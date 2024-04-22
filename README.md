@@ -6,7 +6,7 @@
 
 ## Overview
 
-![59fbae3c-d5ab-45b7-817d-0118e4502562](file:///D:/Pictures/Typedown/59fbae3c-d5ab-45b7-817d-0118e4502562.png)
+![figure1](figure1.png)
 
 <div align=center>
 <sup>Figure 1: Train strategy(left), Framework(right top) and losses(right bottom).</sup>
