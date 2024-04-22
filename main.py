@@ -59,9 +59,9 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             _, d_f_oct = encoder(img_oct)
             rec_tir = decoder(detail_feature=d_f_tir)
             rec_oct = decoder(detail_feature=d_f_oct)
-            img_tir_def, flow = deformer(d_f_tir, d_f_oct, img_tir)
-            _, d_f_img_tir_def = encoder(img_tir_def)
-            f_fused = fuser(d_f_img_tir_def, d_f_oct)
+            img_oct_def, flow = deformer(d_f_tir, d_f_oct, img_oct)
+            _, d_f_img_oct_def = encoder(img_oct_def)
+            f_fused = fuser(d_f_img_oct_def, d_f_tir)
             img_fused = decoder(f_fused)
             q_tir = calc_quality(img_tir)
             q_oct = calc_quality(img_oct)
@@ -70,8 +70,7 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             # calc loss
             ssim_loss_value = args.ssim_weight * (ssim_loss(rec_tir, img_tir) + ssim_loss(rec_oct, img_oct))
             rec_loss_value = mse_loss(rec_tir, img_tir) + mse_loss(rec_oct, img_oct)
-            ncc_loss_value = ncc_loss(img_tir_def, img_oct)
-            diff_loss_value = mse_loss(img_tir_def, img_oct)
+            ncc_loss_value = ncc_loss(img_oct_def, img_tir)
             grad_loss_value = grad_loss(flow)
             fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(
                 img_fused, img_oct
@@ -86,7 +85,6 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
                 ssim_loss_value.item()
                 + rec_loss_value.item()
                 + ncc_loss_value.item()
-                + diff_loss_value.item()
                 + grad_loss_value.item()
                 + fuse_loss_value.item()
                 + quality_loss_value.item()
@@ -95,8 +93,8 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             test_loss += total_loss_value
             logging.debug(
                 f"[Test loss] ssim: {ssim_loss_value.item():.5f} rec: {rec_loss_value.item():.5f} \
-                    ncc: {ncc_loss_value.item():.5f} diff: {diff_loss_value.item():.5f} \
-                    grad: {grad_loss_value.item():.5f} fuse: {fuse_loss_value.item():.5f} \
+                    ncc: {ncc_loss_value.item():.5f} grad: {grad_loss_value.item():.5f}  \
+                    fuse: {fuse_loss_value.item():.5f} \
                     quality: {quality_loss_value.item():.5f} regular: {regular_loss_value.item():.5f}"
             )
 
@@ -109,7 +107,7 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
                     (torch.cat((img_tir, rec_tir), dim=1), torch.cat((img_oct, rec_oct), dim=1)),
                     dim=1,
                 ).cpu()
-                deform_cmp = torch.cat((img_tir, img_oct, img_tir_def), dim=1).cpu()
+                deform_cmp = torch.cat((img_tir, img_oct, img_oct_def), dim=1).cpu()
                 fuse_cmp = torch.cat((img_tir, img_oct, img_fused), dim=1).cpu()
                 quality_cmp = torch.cat((q_tir, q_oct, q_fused), dim=1).cpu()
 
@@ -157,7 +155,6 @@ def train(trainloader, testloader):
     loss_ssim = []
     loss_rec = []
     loss_ncc = []
-    loss_diff = []
     loss_grad = []
     loss_fuse = []
     loss_quality = []
@@ -205,19 +202,16 @@ def train(trainloader, testloader):
                 logging.debug("training deformer...")
                 _, d_f_tir = encoder(img_tir)
                 _, d_f_oct = encoder(img_oct)
-                img_tir_def, flow = deformer(d_f_tir, d_f_oct, img_tir)
+                img_oct_def, flow = deformer(d_f_tir, d_f_oct, img_oct)
 
                 # deformer backward
-                ncc_loss_value = ncc_loss(img_tir_def, img_oct)
-                diff_loss_value = mse_loss(img_tir_def, img_oct)
+                ncc_loss_value = ncc_loss(img_oct_def, img_tir)
                 grad_loss_value = grad_loss(flow)
-                loss2 = ncc_loss_value + diff_loss_value + grad_loss_value
+                loss2 = ncc_loss_value + grad_loss_value
                 loss2.backward()
                 loss_ncc.append(ncc_loss_value.item())
-                loss_diff.append(diff_loss_value.item())
                 loss_grad.append(grad_loss_value.item())
                 logging.debug(f"ncc_loss: {ncc_loss_value.item():.5f}")
-                logging.debug(f"diff_loss: {diff_loss_value.item():.5f}")
                 logging.debug(f"grad_loss: {grad_loss_value.item():.5f}")
 
                 # optimize deformer
@@ -226,8 +220,8 @@ def train(trainloader, testloader):
                 # zero the fuser parameter gradients
                 optimizer3.zero_grad()
 
-                _, d_f_img_tir_def = encoder(img_tir_def)
-                f_fused = fuser(d_f_img_tir_def, d_f_oct)
+                _, d_f_img_oct_def = encoder(img_oct_def)
+                f_fused = fuser(d_f_img_oct_def, d_f_tir)
                 img_fused = decoder(f_fused)
                 q_tir = calc_quality(img_tir)
                 q_oct = calc_quality(img_oct)
@@ -260,8 +254,8 @@ def train(trainloader, testloader):
         logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
         logging.info(
             f"[Train loss] ssim: {np.mean(np.array(loss_ssim)):.5f} rec: {np.mean(np.array(loss_rec)):.5f} \
-                ncc: {np.mean(np.array(loss_ncc)):.5f} diff: {np.mean(np.array(loss_diff)):.5f} \
-                grad: {np.mean(np.array(loss_grad)):.5f}  fuse: {np.mean(np.array(loss_fuse)):.5f} \
+                ncc: {np.mean(np.array(loss_ncc)):.5f} grad: {np.mean(np.array(loss_grad)):.5f} \
+                fuse: {np.mean(np.array(loss_fuse)):.5f} \
                 quality: {np.mean(np.array(loss_quality)):.5f} regular: {np.mean(np.array(loss_regular)):.5f}"
         )
 
