@@ -1,9 +1,9 @@
-from glob import glob
 from os import makedirs
 from os.path import exists, join
 
+import numpy as np
 import torch
-from matplotlib.image import imsave
+from matplotlib.image import imread, imsave
 
 
 def is_exists(path: str) -> bool:
@@ -21,9 +21,21 @@ def join_path(path: str, subpath: str) -> str:
     return join(path, subpath)
 
 
+def read_image(path: str):
+    image = imread(path)
+    if len(image.shape) == 2:
+        image = image[..., np.newaxis]
+    return image
+
+
+def color_invert(image: np.array):
+    return 255 - image
+
+
 def save_tensor(tensor: torch.Tensor, path: str):
-    array = tensor.clamp(0, 1).numpy()
-    array = array.astype("uint8")
+    array = torch.squeeze(tensor).clamp(0, 1).numpy()  # bchw->chw
+    array = (array * 255).astype("uint8")  # float->uint8
+    array = array.transpose(1, 2, 0)  # chw->hwc
     imsave(path, array)
     print(f"save tensor at {path}")
 

@@ -33,11 +33,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# Set transforms
-transforms = PreProcess(args.image_size, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-preprocess_train = transforms.train()
-preprocess_test = transforms.test()
-
 
 def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=False):
     logging.info("start testing...")
@@ -49,8 +44,6 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
 
     with torch.no_grad():
         for i, data in enumerate(testloader):
-            data = preprocess_test(data)
-            assert len(data) == 2
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
 
@@ -72,14 +65,10 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             rec_loss_value = mse_loss(rec_tir, img_tir) + mse_loss(rec_oct, img_oct)
             ncc_loss_value = ncc_loss(img_oct_def, img_tir)
             grad_loss_value = grad_loss(flow)
-            fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(
-                img_fused, img_oct
-            )
+            fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(img_fused, img_oct)
             q_max = torch.maximum(q_tir, q_oct)
             quality_loss_value = torch.mean((q_max - q_fused)[q_max > q_fused])
-            regular_loss_value = args.regular_factor * (
-                torch.mean(q_fused[q_fused > args.quality_thresh]) - args.quality_thresh
-            )
+            regular_loss_value = args.regular_factor * (torch.mean(q_fused[q_fused > args.quality_thresh]) - args.quality_thresh)
 
             total_loss_value = (
                 ssim_loss_value.item()
@@ -166,8 +155,6 @@ def train(trainloader, testloader):
 
         for i, data in enumerate(trainloader):
             # get the inputs
-            data = preprocess_train(data)
-            assert len(data) == 2
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
 
@@ -228,14 +215,10 @@ def train(trainloader, testloader):
                 q_fused = calc_quality(img_fused)
 
                 # fuser backward
-                fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(
-                    img_fused, img_oct
-                )
+                fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(img_fused, img_oct)
                 q_max = torch.maximum(q_tir, q_oct)
                 quality_loss_value = torch.mean((q_max - q_fused)[q_max > q_fused])
-                regular_loss_value = args.regular_factor * (
-                    torch.mean(q_fused[q_fused > args.quality_thresh]) - args.quality_thresh
-                )
+                regular_loss_value = args.regular_factor * (torch.mean(q_fused[q_fused > args.quality_thresh]) - args.quality_thresh)
                 loss3 = fuse_loss_value + quality_loss_value - regular_loss_value
                 loss3.backward()
                 loss_fuse.append(fuse_loss_value.item())
