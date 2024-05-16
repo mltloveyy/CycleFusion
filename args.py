@@ -82,7 +82,7 @@ parser.add_argument(
 # Datasets
 parser.add_argument(
     "--data_dir",
-    default="data",
+    default="images",
     type=str,
     help="input data directory",
 )

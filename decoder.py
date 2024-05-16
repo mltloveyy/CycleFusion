@@ -62,10 +62,8 @@ class CDDFuseDecoder(nn.Module):
         )
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, inp_img, base_feature, detail_feature):
-        # out_enc_level0 = torch.cat((base_feature, detail_feature), dim=1)
-        out_enc_level0 = detail_feature
-        out_enc_level0 = self.reduce_channel(out_enc_level0)
+    def forward(self, features, inp_img=None):
+        out_enc_level0 = self.reduce_channel(features)
         out_enc_level1 = self.encoder_level2(out_enc_level0)
         if inp_img is not None:
             out_enc_level1 = self.output(out_enc_level1) + inp_img

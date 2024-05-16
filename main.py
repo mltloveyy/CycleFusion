@@ -7,13 +7,13 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, random_split
 
 from args import parser
-from data_process import FingerPrint, PreProcess
+from data_process import FingerPrint
 from decoder import CDDFuseDecoder
 from deformer import CnnRegisterer
 from encoder import CDDFuseEncoder
 from fusion import FeatureFusion
 from losses import *
-from quality import calc_quality
+from quality import calc_quality_torch
 from utils import *
 
 # Set device
@@ -56,9 +56,9 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             _, d_f_img_oct_def = encoder(img_oct_def)
             f_fused = fuser(d_f_img_oct_def, d_f_tir)
             img_fused = decoder(f_fused)
-            q_tir = calc_quality(img_tir)
-            q_oct = calc_quality(img_oct)
-            q_fused = calc_quality(img_fused)
+            q_tir = calc_quality_torch(img_tir)
+            q_oct = calc_quality_torch(img_oct)
+            q_fused = calc_quality_torch(img_fused)
 
             # calc loss
             ssim_loss_value = args.ssim_weight * (ssim_loss(rec_tir, img_tir) + ssim_loss(rec_oct, img_oct))
@@ -112,7 +112,7 @@ def train(trainloader, testloader):
     # init models
     encoder = CDDFuseEncoder()
     decoder = CDDFuseDecoder()
-    deformer = CnnRegisterer()
+    deformer = CnnRegisterer(img_size=args.image_size)
     fuser = FeatureFusion()
 
     enc_model_path = args.pretrain_weight + "_enc.pth"
@@ -163,10 +163,10 @@ def train(trainloader, testloader):
 
             # reconstructor forward
             logging.debug("training reconstructor...")
-            _, d_f_tir = encoder(img_tir).detach()
-            _, d_f_oct = encoder(img_oct).detach()
-            rec_tir = decoder(detail_feature=d_f_tir).detach()
-            rec_oct = decoder(detail_feature=d_f_oct).detach()
+            f_tir = encoder(img_tir)
+            f_oct = encoder(img_oct)
+            rec_tir = decoder(features=f_tir)
+            rec_oct = decoder(features=f_oct)
 
             # reconstructor backward
             ssim_loss_value = args.ssim_weight * (ssim_loss(rec_tir, img_tir) + ssim_loss(rec_oct, img_oct))
@@ -182,14 +182,20 @@ def train(trainloader, testloader):
             optimizer1.step()
 
             if i % args.critic == 0:
+                # froze encoder & decoder
+                for param in encoder.parameters():
+                    param.requires_grad = False
+                for param in decoder.parameters():
+                    param.requires_grad = False
+
                 # zero the deformer parameter gradients
                 optimizer2.zero_grad()
 
                 # deformer forward
                 logging.debug("training deformer...")
-                _, d_f_tir = encoder(img_tir)
-                _, d_f_oct = encoder(img_oct)
-                img_oct_def, flow = deformer(d_f_tir, d_f_oct, img_oct)
+                f_tir = encoder(img_tir)
+                f_oct = encoder(img_oct)
+                img_oct_def, flow = deformer(f_tir, f_oct, img_oct)
 
                 # deformer backward
                 ncc_loss_value = ncc_loss(img_oct_def, img_tir)
@@ -207,12 +213,12 @@ def train(trainloader, testloader):
                 # zero the fuser parameter gradients
                 optimizer3.zero_grad()
 
-                _, d_f_img_oct_def = encoder(img_oct_def)
-                f_fused = fuser(d_f_img_oct_def, d_f_tir)
+                f_img_oct_def = encoder(img_oct_def)
+                f_fused = fuser(f_img_oct_def, f_tir)
                 img_fused = decoder(f_fused)
-                q_tir = calc_quality(img_tir)
-                q_oct = calc_quality(img_oct)
-                q_fused = calc_quality(img_fused)
+                q_tir = calc_quality_torch(img_tir)
+                q_oct = calc_quality_torch(img_oct)
+                q_fused = calc_quality_torch(img_fused.detach())
 
                 # fuser backward
                 fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(img_fused, img_oct)

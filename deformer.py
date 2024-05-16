@@ -65,18 +65,21 @@ class CnnRegisterer(nn.Module):
         self,
         in_channels=1,
         out_channels=2,
-        dims=[64, 48, 32],
+        dims=[128, 64, 32],
         reg_head_channel=16,
         img_size=224,
     ):
         super(CnnRegisterer, self).__init__()
 
         self.conv = nn.Conv2d(2 * dims[0], dims[0], kernel_size=3, stride=1, padding=1)
-        self.up0 = UpBlock(dims[0], dims[1])
-        self.up1 = UpBlock(dims[1], dims[2])
-        self.up2 = UpBlock(dims[2], reg_head_channel)
+        self.up0 = nn.Conv2d(dims[0], dims[1], kernel_size=3, stride=1, padding=1)
+        self.up1 = nn.Conv2d(dims[1], dims[2], kernel_size=3, stride=1, padding=1)
+        self.up2 = nn.Conv2d(dims[2], reg_head_channel, kernel_size=3, stride=1, padding=1)
+        # self.up0 = UpBlock(dims[0], dims[1])
+        # self.up1 = UpBlock(dims[1], dims[2])
+        # self.up2 = UpBlock(dims[2], reg_head_channel)
         self.reg_head = RegistrationHead(reg_head_channel, out_channels, 3)
-        self.spatial_trans = SpatialTransformer(img_size)
+        self.spatial_trans = SpatialTransformer((img_size, img_size))
 
     def forward(self, f1, f2, source):
         x = torch.cat((f1, f2), dim=1)

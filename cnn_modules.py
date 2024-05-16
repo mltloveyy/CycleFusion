@@ -83,13 +83,13 @@ class CBAM(nn.Module):
 class DenseConv2d(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
         super(DenseConv2d, self).__init__()
-        self.dense_conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        out = self.dense_conv(x)
+        out = self.conv(x)
         out = self.relu(out)
-        out = torch.cat([x, out], 1)
+        out = torch.cat([x, out], dim=1)
         return out
 
 
@@ -113,12 +113,12 @@ class UpBlock(nn.Module):
         super().__init__()
         self.conv1 = ConvActNorm(in_channels + skip_channels, out_channels, 3, 1)
         self.conv2 = ConvActNorm(out_channels, out_channels, 3, 1)
-        self.up = nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False)
+        self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
 
     def forward(self, x, skip=None):
         x = self.up(x)
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
-        x = self.conv1(x)
+            x = self.conv1(x)
         x = self.conv2(x)
         return x

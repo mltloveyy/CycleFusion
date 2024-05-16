@@ -67,8 +67,9 @@ class CDDFuseEncoder(nn.Module):
         self.detailFeature = DetailFeatureExtraction()
 
     def forward(self, in_img):
-        in_enc_level1 = self.patch_embed(in_img)
-        out_enc_level1 = self.encoder_level1(in_enc_level1)
-        base_feature = self.baseFeature(out_enc_level1)
-        detail_feature = self.detailFeature(out_enc_level1)
-        return base_feature, detail_feature
+        in_enc_level1 = self.patch_embed(in_img)  # b*64*h*w
+        out_enc_level1 = self.encoder_level1(in_enc_level1)  # b*64*h*w
+        base_feature = self.baseFeature(out_enc_level1)  # b*64*h*w
+        detail_feature = self.detailFeature(out_enc_level1)  # b*64*h*w
+        features = torch.cat((base_feature, detail_feature), dim=1)
+        return features

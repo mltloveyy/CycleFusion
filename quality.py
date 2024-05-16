@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from scipy.ndimage import (
     correlate,
     generate_binary_structure,
@@ -10,7 +11,15 @@ from scipy.ndimage import (
 EPSILON = 1e-6
 
 
-def calc_quality(image):
+def calc_quality_torch(tensor: torch.Tensor) -> torch.Tensor:
+    array = tensor.cpu().numpy()
+    score = [[calc_quality(np.squeeze(a))] for a in array]
+    score = torch.Tensor(score).cuda()
+    return score
+
+
+def calc_quality(image: np.array) -> np.array:
+    assert len(image.shape) == 2
     grady, gradx = np.gradient(image)
     # x = x if x < 64, x = x - 128 if 64 <= x < 192, x = x - 256 if x >= 192
     grady = np.where(grady < 64, grady, grady - 128)
@@ -51,12 +60,17 @@ def calc_quality(image):
     coh = (eigv_max - eigv_min) / (eigv_max + eigv_min + EPSILON)
     coh = coh * mask
 
-    return mask, ocl, sc, coh
+    score = ocl
+
+    return score
 
 
 if __name__ == "__main__":
     from matplotlib.image import imread, imsave
 
-    image = imread("images/train/tir/cjj-L1-1-first_1.bmp")
-    mask, ocl, sc, coh = calc_quality(image)
-    imsave("mask.jpg", mask * image, cmap="gray")
+    # image = imread("images/tir/1F-L2-2-TIR-gray1-EF-DA.bmp")
+    # score = calc_quality(image)
+    # imsave("mask.jpg", score, cmap="gray")
+
+    tensor = torch.rand(size=(4, 1, 256, 256), device="cuda")
+    score = calc_quality_torch(tensor)

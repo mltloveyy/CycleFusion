@@ -47,7 +47,7 @@ class FingerPrint(Dataset):
         img_paths_tir = glob(join(tir_root_dir, "*.bmp"))
         self.all_paths = []
         self.with_score = with_score
-        self.preprocess = PreProcess(image_size=256)
+        self.preprocess = PreProcess(image_size=256, mean=[0], std=[1])
 
         for img_path_tir in img_paths_tir:
             img_tir_basename = basename(img_path_tir)
@@ -81,11 +81,14 @@ class FingerPrint(Dataset):
 
 
 if __name__ == "__main__":
-    tir_data_path = "images/lmtu/tir"
-    oct_data_path = "images/lmtu/oct"
-    datasets = FingerPrint(tir_data_path, oct_data_path, True)
+    tir_data_path = "images/tir"
+    oct_data_path = "images/oct"
+    datasets = FingerPrint(tir_data_path, oct_data_path)
     dataloader = DataLoader(datasets, batch_size=1, shuffle=False)
 
-    for data in dataloader:
-        save_tensor(data[0], "img_tir.jpg")
-        save_tensor(data[1], "img_oct.jpg")
+    test_num = 5
+    for i, data in enumerate(dataloader):
+        save_tensor(data[0], f"img_tir_{i}.jpg")
+        save_tensor(data[1], f"img_oct_{i}.jpg")
+        if i > test_num:
+            exit(0)

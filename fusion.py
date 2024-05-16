@@ -37,8 +37,9 @@ def weight_fusion(
 
 
 class FeatureFusion(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self):
         super(FeatureFusion, self).__init__()
+        input_dim = 256
         dim = 64
 
         self.conv1 = nn.Conv2d(input_dim, dim, kernel_size=3, stride=1, padding=1)

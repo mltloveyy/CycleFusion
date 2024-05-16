@@ -67,9 +67,7 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
             pixel_loss_value = mse_loss(tir_rec, img_tir) + mse_loss(oct_rec, img_oct)
             better_fusion_loss_value = mse_loss(score_fused_probs, union_mask)
-            total_loss_value = (
-                quality_loss_value.item() + ssim_loss_value.item() + pixel_loss_value.item() + better_fusion_loss_value.item()
-            )
+            total_loss_value = quality_loss_value.item() + ssim_loss_value.item() + pixel_loss_value.item() + better_fusion_loss_value.item()
             test_loss += total_loss_value
             logging.debug(
                 f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} \
@@ -136,8 +134,8 @@ def train(trainloader, testloader):
 
             # encoder forward
             logging.debug("training encoder...")
-            _, score_tir_probs = encoder(img_tir).detach()
-            _, score_oct_probs = encoder(img_oct).detach()
+            _, score_tir_probs = encoder(img_tir)
+            _, score_oct_probs = encoder(img_oct)
 
             # encoder backward
             quality_loss_value = mse_loss(score_tir_probs, score_tir) + mse_loss(score_oct_probs, score_oct)
