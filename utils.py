@@ -1,27 +1,20 @@
-from os import makedirs
-from os.path import exists, join
+import os
 
 import numpy as np
 import torch
 from matplotlib.image import imread, imsave
 
 
-def is_exists(path: str) -> bool:
-    if path is not None:
-        return exists(path)
-    else:
-        return False
-
-
 def create_dirs(path: str):
-    return makedirs(path)
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 
 def join_path(path: str, subpath: str) -> str:
-    return join(path, subpath)
+    return os.path.join(path, subpath)
 
 
-def read_image(path: str):
+def read_image(path: str) -> np.array:
     image = imread(path)
     if len(image.shape) == 2:
         image = image[..., np.newaxis]
@@ -33,19 +26,22 @@ def color_invert(image: np.array):
 
 
 def save_tensor(tensor: torch.Tensor, path: str):
-    array = torch.squeeze(tensor).clamp(0, 1).numpy()  # bchw->chw
+    array = torch.squeeze(tensor, dim=0).clamp(0, 1).numpy()  # bchw->chw
     array = (array * 255).astype("uint8")  # float->uint8
-    array = array.transpose(1, 2, 0)  # chw->hwc
-    imsave(path, array)
+    array = np.squeeze(array.transpose(1, 2, 0))  # chw->hwc/hw
+    if array.ndim == 2:
+        imsave(path, array, cmap="gray")
+    else:
+        imsave(path, array)
     print(f"save tensor at {path}")
 
 
-def load_model(path, model):
-    if is_exists(path):
+def load_model(path: str, model):
+    if os.path.exists(path):
         model.load_state_dict(torch.load(path))
         print(f"load model state dict from {path}")
 
 
-def save_model(path, model):
+def save_model(path: str, model):
     torch.save(model.state_dict(), path)
     print(f"save model state dict at {path}")

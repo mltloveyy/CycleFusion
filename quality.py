@@ -14,12 +14,12 @@ EPSILON = 1e-6
 def calc_quality_torch(tensor: torch.Tensor) -> torch.Tensor:
     array = tensor.cpu().numpy()
     score = [[calc_quality(np.squeeze(a))] for a in array]
-    score = torch.Tensor(score).cuda()
+    score = torch.Tensor(np.array(score)).cuda()
     return score
 
 
 def calc_quality(image: np.array) -> np.array:
-    assert len(image.shape) == 2
+    assert image.ndim == 2
     grady, gradx = np.gradient(image)
     # x = x if x < 64, x = x - 128 if 64 <= x < 192, x = x - 256 if x >= 192
     grady = np.where(grady < 64, grady, grady - 128)
@@ -66,11 +66,15 @@ def calc_quality(image: np.array) -> np.array:
 
 
 if __name__ == "__main__":
+    import os
+
     from matplotlib.image import imread, imsave
 
-    # image = imread("images/tir/1F-L2-2-TIR-gray1-EF-DA.bmp")
-    # score = calc_quality(image)
-    # imsave("mask.jpg", score, cmap="gray")
+    path = "images/tir"
+    for file in os.listdir(path):
+        image = imread(file)
+        score = calc_quality(image)
+        imsave(file.replace(".bmp", ".jpg"), score, cmap="gray")
 
-    tensor = torch.rand(size=(4, 1, 256, 256), device="cuda")
-    score = calc_quality_torch(tensor)
+    # tensor = torch.rand(size=(4, 1, 256, 256), device="cuda")
+    # score = calc_quality_torch(tensor)

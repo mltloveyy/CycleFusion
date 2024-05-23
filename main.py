@@ -1,10 +1,12 @@
 import logging
+import random
 import time
+from glob import glob
 
 import numpy as np
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from args import parser
 from data_process import FingerPrint
@@ -28,9 +30,12 @@ create_dirs(args.output_dir)
 
 # Set logging
 logging.basicConfig(
-    filename=join_path(args.output_dir, current_time + ".log"),
     format="%(asctime)s - %(funcName)s - %(levelname)s - %(message)s",
     level=logging.INFO,
+    handlers=[
+        logging.FileHandler(join_path(args.output_dir, current_time + ".log")),
+        logging.StreamHandler(),
+    ],
 )
 
 
@@ -48,17 +53,17 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
             img_oct = data[1].to(device)
 
             # run the model on the test set to predict
-            _, d_f_tir = encoder(img_tir)
-            _, d_f_oct = encoder(img_oct)
-            rec_tir = decoder(detail_feature=d_f_tir)
-            rec_oct = decoder(detail_feature=d_f_oct)
-            img_oct_def, flow = deformer(d_f_tir, d_f_oct, img_oct)
-            _, d_f_img_oct_def = encoder(img_oct_def)
-            f_fused = fuser(d_f_img_oct_def, d_f_tir)
+            f_tir = encoder(img_tir)
+            f_oct = encoder(img_oct)
+            rec_tir = decoder(features=f_tir)
+            rec_oct = decoder(features=f_oct)
+            img_oct_def, flow = deformer(f_tir, f_oct, img_oct)
+            f_img_oct_def = encoder(img_oct_def)
+            f_fused = fuser(f_img_oct_def, f_tir)
             img_fused = decoder(f_fused)
             q_tir = calc_quality_torch(img_tir)
             q_oct = calc_quality_torch(img_oct)
-            q_fused = calc_quality_torch(img_fused)
+            q_fused = calc_quality_torch(img_fused.detach())
 
             # calc loss
             ssim_loss_value = args.ssim_weight * (ssim_loss(rec_tir, img_tir) + ssim_loss(rec_oct, img_oct))
@@ -80,11 +85,8 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
                 - regular_loss_value.item()
             )
             test_loss += total_loss_value
-            logging.debug(
-                f"[Test loss] ssim: {ssim_loss_value.item():.5f} rec: {rec_loss_value.item():.5f} \
-                    ncc: {ncc_loss_value.item():.5f} grad: {grad_loss_value.item():.5f}  \
-                    fuse: {fuse_loss_value.item():.5f} \
-                    quality: {quality_loss_value.item():.5f} regular: {regular_loss_value.item():.5f}"
+            logging.info(
+                f"[Test loss] ssim: {ssim_loss_value.item():.5f} rec: {rec_loss_value.item():.5f} ncc: {ncc_loss_value.item():.5f} grad: {grad_loss_value.item():.5f} fuse: {fuse_loss_value.item():.5f} quality: {quality_loss_value.item():.5f} regular: {regular_loss_value.item():.5f}"
             )
 
             # save test set results
@@ -92,20 +94,17 @@ def test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=Fals
                 logging.info(f"save results at epoch={epoch}")
                 save_dir = join_path(args.output_dir, "validations")
                 create_dirs(save_dir)
-                imgs_cmp = torch.cat(
-                    (torch.cat((img_tir, rec_tir), dim=1), torch.cat((img_oct, rec_oct), dim=1)),
-                    dim=1,
-                ).cpu()
-                deform_cmp = torch.cat((img_tir, img_oct, img_oct_def), dim=1).cpu()
-                fuse_cmp = torch.cat((img_tir, img_oct, img_fused), dim=1).cpu()
-                quality_cmp = torch.cat((q_tir, q_oct, q_fused), dim=1).cpu()
+                imgs_cmp = torch.cat((img_tir, rec_tir, img_oct, rec_oct), dim=-1).cpu()
+                deform_cmp = torch.cat((img_tir, img_oct, img_oct_def), dim=-1).cpu()
+                fuse_cmp = torch.cat((img_tir, img_oct, img_fused), dim=-1).cpu()
+                quality_cmp = torch.cat((q_tir, q_oct, q_fused), dim=-1).cpu()
 
                 save_tensor(imgs_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_img_cmp.jpg"))
                 save_tensor(deform_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_deform_cmp.jpg"))
                 save_tensor(fuse_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_fuse_cmp.jpg"))
                 save_tensor(quality_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_quality_cmp.jpg"))
 
-    return test_loss / len(testloader)
+        return test_loss / len(testloader)
 
 
 def train(trainloader, testloader):
@@ -114,26 +113,13 @@ def train(trainloader, testloader):
     decoder = CDDFuseDecoder()
     deformer = CnnRegisterer(img_size=args.image_size)
     fuser = FeatureFusion()
+    load_model(args.pretrain_weight + "_enc.pth", encoder)
+    load_model(args.pretrain_weight + "_dec.pth", decoder)
+    load_model(args.pretrain_weight + "_def.pth", deformer)
+    load_model(args.pretrain_weight + "_fuse.pth", fuser)
 
-    enc_model_path = args.pretrain_weight + "_enc.pth"
-    dec_model_path = args.pretrain_weight + "_dec.pth"
-    def_model_path = args.pretrain_weight + "_def.pth"
-    fuse_model_path = args.pretrain_weight + "_fuse.pth"
-
-    load_model(enc_model_path, encoder)
-    load_model(dec_model_path, decoder)
-    load_model(def_model_path, deformer)
-    load_model(fuse_model_path, fuser)
-
-    optimizer1 = Adam(
-        [
-            {"params": encoder.parameters()},
-            {"params": decoder.parameters()},
-        ],
-        lr=args.lr,
-    )
-    optimizer2 = Adam(deformer.parameters(), lr=args.lr)
-    optimizer3 = Adam(fuser.parameters(), lr=args.lr)
+    optimizer1 = Adam([{"params": encoder.parameters()}, {"params": decoder.parameters()}], lr=args.lr)
+    optimizer2 = Adam([{"params": deformer.parameters()}, {"params": fuser.parameters()}], lr=args.lr)
 
     encoder = encoder.to(device)
     decoder = decoder.to(device)
@@ -150,7 +136,7 @@ def train(trainloader, testloader):
     loss_regular = []
 
     for epoch in range(args.epochs):  # loop over the dataset multiple times
-        logging.info(f"start training No.{epoch+1} epoch...")
+        logging.info(f"start training No.{epoch} epoch...")
         start_epoch = time.time()
 
         for i, data in enumerate(trainloader):
@@ -162,7 +148,6 @@ def train(trainloader, testloader):
             optimizer1.zero_grad()
 
             # reconstructor forward
-            logging.debug("training reconstructor...")
             f_tir = encoder(img_tir)
             f_oct = encoder(img_oct)
             rec_tir = decoder(features=f_tir)
@@ -175,8 +160,6 @@ def train(trainloader, testloader):
             loss1.backward()
             loss_ssim.append(ssim_loss_value.item())
             loss_rec.append(rec_loss_value.item())
-            logging.debug(f"ssim_loss: {ssim_loss_value.item():.5f}")
-            logging.debug(f"rec_loss: {rec_loss_value.item():.5f}")
 
             # optimize reconstructor
             optimizer1.step()
@@ -188,31 +171,13 @@ def train(trainloader, testloader):
                 for param in decoder.parameters():
                     param.requires_grad = False
 
-                # zero the deformer parameter gradients
+                # zero the parameter gradients of deformer and fuser
                 optimizer2.zero_grad()
 
-                # deformer forward
-                logging.debug("training deformer...")
+                # deformer and fuser forward
                 f_tir = encoder(img_tir)
                 f_oct = encoder(img_oct)
                 img_oct_def, flow = deformer(f_tir, f_oct, img_oct)
-
-                # deformer backward
-                ncc_loss_value = ncc_loss(img_oct_def, img_tir)
-                grad_loss_value = grad_loss(flow)
-                loss2 = ncc_loss_value + grad_loss_value
-                loss2.backward()
-                loss_ncc.append(ncc_loss_value.item())
-                loss_grad.append(grad_loss_value.item())
-                logging.debug(f"ncc_loss: {ncc_loss_value.item():.5f}")
-                logging.debug(f"grad_loss: {grad_loss_value.item():.5f}")
-
-                # optimize deformer
-                optimizer2.step()
-
-                # zero the fuser parameter gradients
-                optimizer3.zero_grad()
-
                 f_img_oct_def = encoder(img_oct_def)
                 f_fused = fuser(f_img_oct_def, f_tir)
                 img_fused = decoder(f_fused)
@@ -220,36 +185,50 @@ def train(trainloader, testloader):
                 q_oct = calc_quality_torch(img_oct)
                 q_fused = calc_quality_torch(img_fused.detach())
 
-                # fuser backward
+                # deformer and fuser backward
+                ncc_loss_value = ncc_loss(img_oct_def, img_tir)
+                grad_loss_value = grad_loss(flow)
                 fuse_loss_value = args.fuse_weight * mse_loss(img_fused, img_tir) + (1 - args.fuse_weight) * mse_loss(img_fused, img_oct)
                 q_max = torch.maximum(q_tir, q_oct)
                 quality_loss_value = torch.mean((q_max - q_fused)[q_max > q_fused])
                 regular_loss_value = args.regular_factor * (torch.mean(q_fused[q_fused > args.quality_thresh]) - args.quality_thresh)
-                loss3 = fuse_loss_value + quality_loss_value - regular_loss_value
-                loss3.backward()
+                loss2 = ncc_loss_value + grad_loss_value + fuse_loss_value + quality_loss_value - regular_loss_value
+                loss2.backward()
+                loss_ncc.append(ncc_loss_value.item())
+                loss_grad.append(grad_loss_value.item())
                 loss_fuse.append(fuse_loss_value.item())
                 loss_quality.append(quality_loss_value.item())
                 loss_regular.append(regular_loss_value.item())
-                logging.debug(f"fuse_loss: {fuse_loss_value.item():.5f}")
-                logging.debug(f"quality_loss: {quality_loss_value.item():.5f}")
-                logging.debug(f"regular_loss: {regular_loss_value.item():.5f}")
+                logging.info(
+                    f"[Iter{i}] ssim: {ssim_loss_value.item():.5f} rec: {rec_loss_value.item():.5f} ncc: {ncc_loss_value.item():.5f} grad: {grad_loss_value.item():.5f} fuse: {fuse_loss_value.item():.5f} quality: {quality_loss_value.item():.5f} regular: {regular_loss_value.item():.5f}"
+                )
 
-                # optimize fuser
-                optimizer3.step()
+                # optimize deformer and fuser
+                optimizer2.step()
+
+                # unfroze encoder & decoder
+                for param in encoder.parameters():
+                    param.requires_grad = True
+                for param in decoder.parameters():
+                    param.requires_grad = True
 
         end_epoch = time.time()
 
-        # logging.info loss
-        logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
+        # epoch loss
+        mean_ssim = np.mean(np.array(loss_ssim))
+        mean_rec = np.mean(np.array(loss_rec))
+        mean_ncc = np.mean(np.array(loss_ncc))
+        mean_grad = np.mean(np.array(loss_grad))
+        mean_fuse = np.mean(np.array(loss_fuse))
+        mean_quality = np.mean(np.array(loss_quality))
+        mean_regular = np.mean(np.array(loss_regular))
+        logging.info(f"epoch: {epoch} time_taken: {end_epoch - start_epoch:.3f}")
         logging.info(
-            f"[Train loss] ssim: {np.mean(np.array(loss_ssim)):.5f} rec: {np.mean(np.array(loss_rec)):.5f} \
-                ncc: {np.mean(np.array(loss_ncc)):.5f} grad: {np.mean(np.array(loss_grad)):.5f} \
-                fuse: {np.mean(np.array(loss_fuse)):.5f} \
-                quality: {np.mean(np.array(loss_quality)):.5f} regular: {np.mean(np.array(loss_regular)):.5f}"
+            f"[Train loss] ssim: {mean_ssim:.5f} rec: {mean_rec:.5f} ncc: {mean_ncc:.5f} grad: {mean_grad:.5f} fuse: {mean_fuse:.5f} quality: {mean_quality:.5f} regular: {mean_regular:.5f}"
         )
 
         # Get loss on the test set
-        test_loss = test(encoder, decoder, deformer, fuser, testloader, epoch + 1)
+        test_loss = test(encoder, decoder, deformer, fuser, testloader, epoch, write_result=True)
         if test_loss < loss_minimum:
             loss_minimum = test_loss
             best_epoch = epoch
@@ -257,17 +236,17 @@ def train(trainloader, testloader):
 
         # Condition for early stopping
         if epoch - best_epoch > args.patience:
-            logging.info(f"Early stopping at epoch {epoch+1}")
+            logging.info(f"Early stopping at epoch {epoch}")
             break
 
         # Save checkpoints
         if epoch > 5 & epoch % args.save_interval == 0:
             models_dir = join_path(args.output_dir, "models")
             create_dirs(models_dir)
-            save_model(join_path(models_dir, f"epoch{epoch+1}_enc.pth"), encoder)
-            save_model(join_path(models_dir, f"epoch{epoch+1}_dec.pth"), decoder)
-            save_model(join_path(models_dir, f"epoch{epoch+1}_def.pth"), deformer)
-            save_model(join_path(models_dir, f"epoch{epoch+1}_fuse.pth"), fuser)
+            save_model(join_path(models_dir, f"epoch{epoch}_enc.pth"), encoder)
+            save_model(join_path(models_dir, f"epoch{epoch}_dec.pth"), decoder)
+            save_model(join_path(models_dir, f"epoch{epoch}_def.pth"), deformer)
+            save_model(join_path(models_dir, f"epoch{epoch}_fuse.pth"), fuser)
 
         logging.info("========================================")
 
@@ -278,15 +257,20 @@ if __name__ == "__main__":
     # Fetch dataset
     tir_data_path = join_path(args.data_dir, "tir")
     oct_data_path = join_path(args.data_dir, "oct")
-    datasets = FingerPrint(tir_data_path, oct_data_path)
-    logging.info(f"Dataset size: {len(datasets)}")
 
     if args.is_train:
         # Split dataset
-        train_set, test_set = random_split(datasets, [args.train_ratio, 1 - args.train_ratio])
-        logging.info(f"Train set size: {len(train_set)}, Test set size: {len(test_set)}")
+        img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
+        logging.info(f"Dataset size: {len(img_paths_tir)}")
+        random.shuffle(img_paths_tir)
+        test_paths = img_paths_tir[: args.test_num]
+        train_paths = img_paths_tir[args.test_num :]
+        train_set = FingerPrint(train_paths, tir_data_path, oct_data_path, is_train=True)
+        test_set = FingerPrint(test_paths, tir_data_path, oct_data_path, is_train=False)
+        logging.info(f"Train set size: {len(train_paths)}, Test set size: {len(test_paths)}")
         trainloader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
         testloader = DataLoader(test_set, batch_size=1, shuffle=False)
+
         # Train models
         encoder, decoder, deformer, fuser = train(trainloader, testloader)
 
@@ -302,16 +286,12 @@ if __name__ == "__main__":
         decoder = CDDFuseDecoder()
         deformer = CnnRegisterer()
         fuser = FeatureFusion()
+        load_model(args.pretrain_weight + "_enc.pth", encoder)
+        load_model(args.pretrain_weight + "_dec.pth", decoder)
+        load_model(args.pretrain_weight + "_def.pth", deformer)
+        load_model(args.pretrain_weight + "_fuse.pth", fuser)
 
-        enc_model_path = args.pretrain_weight + "_enc.pth"
-        dec_model_path = args.pretrain_weight + "_dec.pth"
-        def_model_path = args.pretrain_weight + "_def.pth"
-        fuse_model_path = args.pretrain_weight + "_fuse.pth"
-
-        load_model(enc_model_path, encoder)
-        load_model(dec_model_path, decoder)
-        load_model(def_model_path, deformer)
-        load_model(fuse_model_path, fuser)
-
+        img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
+        datasets = FingerPrint(img_paths_tir, tir_data_path, oct_data_path, is_train=False)
         testloader = DataLoader(datasets, batch_size=1, shuffle=False)
         test(encoder, decoder, deformer, fuser, testloader, 0, write_result=True)

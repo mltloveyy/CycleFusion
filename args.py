@@ -23,13 +23,13 @@ parser.add_argument(
 )
 parser.add_argument(
     "--epochs",
-    default=4,
+    default=2,
     type=int,
     help="number of training epochs",
 )
 parser.add_argument(
     "--batch_size",
-    default=4,
+    default=2,
     type=int,
     help="batch size for training",
 )
@@ -87,10 +87,10 @@ parser.add_argument(
     help="input data directory",
 )
 parser.add_argument(
-    "--train_ratio",
-    default=0.7,
-    type=float,
-    help="the ratio of training set to dataset",
+    "--test-num",
+    default=20,
+    type=int,
+    help="the number of testing to dataset",
 )
 parser.add_argument(
     "--image_size",

@@ -1,13 +1,15 @@
 import logging
+import random
 import time
+from glob import glob
 
 import numpy as np
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from args import parser
-from data_process import FingerPrint, PreProcess
+from data_process import FingerPrint
 from decoder import DenseFuseDecoder
 from encoder import DenseFuseEncoder
 from fusion import weight_fusion
@@ -26,15 +28,13 @@ create_dirs(args.output_dir)
 
 # Set logging
 logging.basicConfig(
-    filename=join_path(args.output_dir, current_time + ".log"),
     format="%(asctime)s - %(funcName)s - %(levelname)s - %(message)s",
     level=logging.INFO,
+    handlers=[
+        logging.FileHandler(join_path(args.output_dir, current_time + ".log")),
+        logging.StreamHandler(),
+    ],
 )
-
-# Set transforms
-transforms = PreProcess(args.image_size, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-preprocess_train = transforms.train()
-preprocess_test = transforms.test()
 
 
 def test(encoder, decoder, testloader, epoch, write_result=False):
@@ -45,7 +45,6 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
 
     with torch.no_grad():
         for i, data in enumerate(testloader):
-            data = preprocess_test(data)
             assert len(data) == 4
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
@@ -70,26 +69,17 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             total_loss_value = quality_loss_value.item() + ssim_loss_value.item() + pixel_loss_value.item() + better_fusion_loss_value.item()
             test_loss += total_loss_value
             logging.debug(
-                f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} \
-                    pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+                f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
             )
 
             # save test set results
             if write_result & epoch % args.save_result_interval == 0:
                 logging.info(f"save results at epoch={epoch}")
                 save_dir = join_path(args.output_dir, "validations")
-                imgs_cmp = torch.cat(
-                    (torch.cat((img_tir, tir_rec), dim=1), torch.cat((img_oct, oct_rec), dim=1)),
-                    dim=1,
-                ).cpu()
-                score_cmp = torch.cat(
-                    (
-                        torch.cat((score_tir, score_tir_probs), dim=1),
-                        torch.cat((score_oct, score_oct_probs), dim=1),
-                    ),
-                    dim=1,
-                ).cpu()
-                fuse_cmp = torch.cat((img_tir, img_oct, img_fused, score_fused_probs), dim=1).cpu()
+                create_dirs(save_dir)
+                imgs_cmp = torch.cat((img_tir, tir_rec, img_oct, oct_rec), dim=-1).cpu()
+                score_cmp = torch.cat((score_tir, score_tir_probs, score_oct, score_oct_probs), dim=-1).cpu()
+                fuse_cmp = torch.cat((img_tir, img_oct, img_fused, score_fused_probs), dim=-1).cpu()
 
                 save_tensor(imgs_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_img_cmp.jpg"))
                 save_tensor(score_cmp, join_path(save_dir, f"epoch_{epoch}_No.{i}_score_cmp.jpg"))
@@ -102,10 +92,8 @@ def train(trainloader, testloader):
     # init models
     encoder = DenseFuseEncoder()
     decoder = DenseFuseDecoder()
-    enc_model_path = args.pretrain_weight + "_enc.pth"
-    dec_model_path = args.pretrain_weight + "_dec.pth"
-    load_model(enc_model_path, encoder)
-    load_model(dec_model_path, decoder)
+    load_model(args.pretrain_weight + "_enc.pth", encoder)
+    load_model(args.pretrain_weight + "_dec.pth", decoder)
 
     optimizer_en = Adam(encoder.parameters(), lr=args.lr)
     optimizer_de = Adam(decoder.parameters(), lr=args.lr)
@@ -117,12 +105,11 @@ def train(trainloader, testloader):
     Loss_quality, Loss_ssim, Loss_pixel, Loss_fusion = [], [], [], []
 
     for epoch in range(args.epochs):  # loop over the dataset multiple times
-        logging.info(f"start training No.{epoch+1} epoch...")
+        logging.info(f"start training No.{epoch} epoch...")
         start_epoch = time.time()
 
         for i, data in enumerate(trainloader):
             # get the inputs
-            data = preprocess_train(data)
             assert len(data) == 4
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
@@ -133,7 +120,6 @@ def train(trainloader, testloader):
             optimizer_en.zero_grad()
 
             # encoder forward
-            logging.debug("training encoder...")
             _, score_tir_probs = encoder(img_tir)
             _, score_oct_probs = encoder(img_oct)
 
@@ -142,17 +128,19 @@ def train(trainloader, testloader):
             encoder_loss = quality_loss_value
             encoder_loss.backward()
             Loss_quality.append(quality_loss_value.item())
-            logging.debug(f"quality_loss: {quality_loss_value.item()}")
 
             # optimize encoder
             optimizer_en.step()
 
             if i % args.critic == 0:
+                # froze encoder & decoder
+                for param in encoder.parameters():
+                    param.requires_grad = False
+
                 # zero the decoder parameter gradients
                 optimizer_de.zero_grad()
 
                 # decoder forward
-                logging.debug("training decoder...")
                 f_tir, score_tir_probs = encoder(img_tir)
                 f_oct, score_oct_probs = encoder(img_oct)
                 f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
@@ -171,24 +159,27 @@ def train(trainloader, testloader):
                 Loss_ssim.append(ssim_loss_value.item())
                 Loss_pixel.append(pixel_loss_value.item())
                 Loss_fusion.append(better_fusion_loss_value.item())
-                logging.debug(f"ssim_loss: {ssim_loss_value.item():.5f}")
-                logging.debug(f"pixel_loss: {pixel_loss_value.item():.5f}")
-                logging.debug(f"better_fusion_loss: {better_fusion_loss_value.item():.5f}")
+                logging.info(
+                    f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+                )
 
                 # optimize decoder
                 optimizer_de.step()
+
+                # unfroze encoder & decoder
+                for param in encoder.parameters():
+                    param.requires_grad = True
 
         end_epoch = time.time()
 
         # logging.info loss
         logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
         logging.info(
-            f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} \
-                           pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}"
+            f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}"
         )
 
         # Get loss on the test set
-        test_loss = test(encoder, decoder, testloader, epoch + 1)
+        test_loss = test(encoder, decoder, testloader, epoch, write_result=True)
         if test_loss < loss_minimum:
             loss_minimum = test_loss
             best_epoch = epoch
@@ -215,15 +206,20 @@ if __name__ == "__main__":
     # Fetch dataset
     tir_data_path = join_path(args.data_dir, "tir")
     oct_data_path = join_path(args.data_dir, "oct")
-    datasets = FingerPrint(tir_data_path, oct_data_path, with_score=True)
-    logging.info(f"Dataset size: {len(datasets)}")
 
     if args.is_train:
         # Split dataset
-        train_set, test_set = random_split(datasets, [args.train_ratio, 1 - args.train_ratio])
+        img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
+        logging.info(f"Dataset size: {len(img_paths_tir)}")
+        random.shuffle(img_paths_tir)
+        test_paths = img_paths_tir[: args.test_num]
+        train_paths = img_paths_tir[args.test_num :]
+        train_set = FingerPrint(tir_data_path, oct_data_path, is_train=True, with_score=True)
+        test_set = FingerPrint(tir_data_path, oct_data_path, is_train=False, with_score=True)
         logging.info(f"Train set size: {len(train_set)}, Test set size: {len(test_set)}")
         trainloader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
         testloader = DataLoader(test_set, batch_size=1, shuffle=False)
+
         # Train models
         encoder, decoder = train(trainloader, testloader)
 
@@ -240,5 +236,7 @@ if __name__ == "__main__":
         load_model(enc_model_path, encoder)
         load_model(dec_model_path, decoder)
 
+        img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
+        datasets = FingerPrint(img_paths_tir, tir_data_path, oct_data_path, is_train=False, with_score=True)
         testloader = DataLoader(datasets, batch_size=1, shuffle=False)
         test(encoder, decoder, testloader, 0, write_result=True)
