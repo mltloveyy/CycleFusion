@@ -103,7 +103,7 @@ if __name__ == "__main__":
                 break
 
     # rename image
-    path = "images/oct"
-    for filename in os.listdir(path):
-        new_filename = filename.replace("W", "F")
-        os.rename(os.path.join(path, filename), os.path.join(path, new_filename))
+    # path = "images/oct"
+    # for filename in os.listdir(path):
+    #     new_filename = filename.replace("W", "F")
+    #     os.rename(os.path.join(path, filename), os.path.join(path, new_filename))

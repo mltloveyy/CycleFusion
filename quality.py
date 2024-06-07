@@ -1,25 +1,32 @@
+import cv2
 import numpy as np
 import torch
-from scipy.ndimage import (
-    correlate,
-    generate_binary_structure,
-    grey_dilation,
-    grey_erosion,
-    iterate_structure,
-)
+from scipy.ndimage import correlate
 
 EPSILON = 1e-6
 
 
-def calc_quality_torch(tensor: torch.Tensor) -> torch.Tensor:
-    array = tensor.cpu().numpy()
-    score = [[calc_quality(np.squeeze(a))] for a in array]
-    score = torch.Tensor(np.array(score)).cuda()
-    return score
+def get_mask(image: np.array) -> np.array:
+    blurred = cv2.GaussianBlur(image, (5, 5), 0)
+    _, binary = cv2.threshold(blurred, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    open = cv2.erode(binary, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))  # 腐蚀
+    open = cv2.dilate(binary, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))  # 膨胀
+    contours, _ = cv2.findContours(open, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    if len(contours) > 0:
+        mask = np.zeros(image.shape, dtype=np.float32)
+        largest_contour = max(contours, key=cv2.contourArea)
+        cv2.drawContours(mask, [largest_contour], 0, (1.0), -1)
+    else:
+        mask = np.ones(image.shape).astype(np.float32)
+
+    return mask
 
 
 def calc_quality(image: np.array) -> np.array:
     assert image.ndim == 2
+    assert image.dtype == np.uint8
     grady, gradx = np.gradient(image)
     # x = x if x < 64, x = x - 128 if 64 <= x < 192, x = x - 256 if x >= 192
     grady = np.where(grady < 64, grady, grady - 128)
@@ -41,12 +48,8 @@ def calc_quality(image: np.array) -> np.array:
     eigv_min = ((a + b) - np.sqrt(pow(a - b, 2) + 4 * pow(c, 2))) / 2.0
 
     # compute mask
-    kernel = generate_binary_structure(2, 1)
-    e_kernel = iterate_structure(kernel, 7)
-    d_kernel = iterate_structure(kernel, 11)
-    opening = grey_erosion(image, structure=e_kernel)
-    opening = grey_dilation(opening, structure=d_kernel)
-    mask = np.where(opening < 150, 1, 0)
+    mask = get_mask(image)
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
 
     # compute ocl
     ocl = np.where(eigv_max < EPSILON, EPSILON, 1.0 - eigv_min / (eigv_max + EPSILON))
@@ -65,16 +68,26 @@ def calc_quality(image: np.array) -> np.array:
     return score
 
 
+def calc_quality_torch(tensor: torch.Tensor) -> torch.Tensor:
+    array = tensor.cpu().numpy()
+    score = [[calc_quality(np.squeeze(a))] for a in array]
+    score = torch.Tensor(np.array(score)).cuda()
+    return score
+
+
 if __name__ == "__main__":
     import os
 
-    from matplotlib.image import imread, imsave
-
     path = "images/tir"
     for file in os.listdir(path):
-        image = imread(file)
-        score = calc_quality(image)
-        imsave(file.replace(".bmp", ".jpg"), score, cmap="gray")
+        file_path = os.path.join(path, file)
+        image = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
+        # score = calc_quality(image)
+        # score = (score * 255).astype(np.uint8)
+        # cv2.imwrite(file_path.replace(".bmp", ".jpg"), score)
+        mask = get_mask(image)
+        mask = (mask * 255).astype(np.uint8)
+        cv2.imwrite(file_path.replace(".bmp", ".jpg"), mask)
 
     # tensor = torch.rand(size=(4, 1, 256, 256), device="cuda")
     # score = calc_quality_torch(tensor)

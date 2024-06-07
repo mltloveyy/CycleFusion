@@ -1,8 +1,8 @@
 import os
 
+import cv2
 import numpy as np
 import torch
-from matplotlib.image import imread, imsave
 
 
 def create_dirs(path: str):
@@ -15,7 +15,7 @@ def join_path(path: str, subpath: str) -> str:
 
 
 def read_image(path: str) -> np.array:
-    image = imread(path)
+    image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if len(image.shape) == 2:
         image = image[..., np.newaxis]
     return image
@@ -27,12 +27,9 @@ def color_invert(image: np.array):
 
 def save_tensor(tensor: torch.Tensor, path: str):
     array = torch.squeeze(tensor, dim=0).clamp(0, 1).numpy()  # bchw->chw
-    array = (array * 255).astype("uint8")  # float->uint8
-    array = np.squeeze(array.transpose(1, 2, 0))  # chw->hwc/hw
-    if array.ndim == 2:
-        imsave(path, array, cmap="gray")
-    else:
-        imsave(path, array)
+    array = (array * 255).astype(np.uint8)  # float->uint8
+    array = array.transpose(1, 2, 0)  # chw->hwc
+    cv2.imwrite(path, array)
     print(f"save tensor at {path}")
 
 

@@ -5,8 +5,8 @@
 - python==3.8
 - torch==2.1.2+cu11.8
 - torchvision==0.16.2+cu11.8
+- opencv-python
 - scipy
-- matplotlib
 - timm
 - einops
 
