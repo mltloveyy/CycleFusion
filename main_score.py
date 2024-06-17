@@ -10,8 +10,8 @@ from torch.utils.data import DataLoader
 
 from args import parser
 from data_process import FingerPrint
-from decoder import DenseFuseDecoder
-from encoder import DenseFuseEncoder
+from decoder import CDDFuseDecoder, DenseFuseDecoder
+from encoder import CDDFuseEncoder, DenseFuseEncoder
 from fusion import weight_fusion
 from losses import *
 from utils import *
@@ -90,8 +90,8 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
 
 def train(trainloader, testloader):
     # init models
-    encoder = DenseFuseEncoder()
-    decoder = DenseFuseDecoder()
+    encoder = CDDFuseEncoder()
+    decoder = CDDFuseDecoder()
     load_model(args.pretrain_weight + "_enc.pth", encoder)
     load_model(args.pretrain_weight + "_dec.pth", decoder)
 
@@ -120,8 +120,8 @@ def train(trainloader, testloader):
             optimizer_en.zero_grad()
 
             # encoder forward
-            _, score_tir_probs = encoder(img_tir)
-            _, score_oct_probs = encoder(img_oct)
+            _, score_tir_probs = encoder(img_tir, True)
+            _, score_oct_probs = encoder(img_oct, True)
 
             # encoder backward
             quality_loss_value = mse_loss(score_tir_probs, score_tir) + mse_loss(score_oct_probs, score_oct)
@@ -141,14 +141,14 @@ def train(trainloader, testloader):
                 optimizer_de.zero_grad()
 
                 # decoder forward
-                f_tir, score_tir_probs = encoder(img_tir)
-                f_oct, score_oct_probs = encoder(img_oct)
+                f_tir, score_tir_probs = encoder(img_tir, True)
+                f_oct, score_oct_probs = encoder(img_oct, True)
                 f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
                 tir_rec = decoder(f_tir)
                 oct_rec = decoder(f_oct)
                 img_fused = decoder(f_fused)
-                _, score_fused_probs = encoder(img_fused)
-                union_mask = torch.logical_or((score_tir < EPSILON), (score_oct < EPSILON))
+                _, score_fused_probs = encoder(img_fused, True)
+                union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
 
                 # decoder backward
                 ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
@@ -214,8 +214,8 @@ if __name__ == "__main__":
         random.shuffle(img_paths_tir)
         test_paths = img_paths_tir[: args.test_num]
         train_paths = img_paths_tir[args.test_num :]
-        train_set = FingerPrint(tir_data_path, oct_data_path, is_train=True, with_score=True)
-        test_set = FingerPrint(tir_data_path, oct_data_path, is_train=False, with_score=True)
+        train_set = FingerPrint(train_paths, tir_data_path, oct_data_path, is_train=True, with_score=True)
+        test_set = FingerPrint(test_paths, tir_data_path, oct_data_path, is_train=False, with_score=True)
         logging.info(f"Train set size: {len(train_set)}, Test set size: {len(test_set)}")
         trainloader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
         testloader = DataLoader(test_set, batch_size=1, shuffle=False)

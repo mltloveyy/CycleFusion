@@ -65,11 +65,20 @@ class CDDFuseEncoder(nn.Module):
         )
         self.baseFeature = BaseFeatureExtraction(dim=dim, num_heads=heads[2])
         self.detailFeature = DetailFeatureExtraction()
+        self.score_head = nn.Sequential(
+            nn.Conv2d(dim * 2, dim, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.LeakyReLU(),
+            nn.Conv2d(dim, out_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            nn.Sigmoid(),
+        )
 
-    def forward(self, in_img):
+    def forward(self, in_img, with_score=False):
         in_enc_level1 = self.patch_embed(in_img)  # b*64*h*w
         out_enc_level1 = self.encoder_level1(in_enc_level1)  # b*64*h*w
         base_feature = self.baseFeature(out_enc_level1)  # b*64*h*w
         detail_feature = self.detailFeature(out_enc_level1)  # b*64*h*w
         features = torch.cat((base_feature, detail_feature), dim=1)
+        if with_score:
+            score = self.score_head(features)
+            return features, score
         return features

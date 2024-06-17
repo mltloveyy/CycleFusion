@@ -20,8 +20,8 @@ def weight_fusion(
         s1_t = torch.exp(s1)
         s2_t = torch.exp(s2)
     elif strategy_type == "power":
-        s1_t = torch.pow(s1)
-        s2_t = torch.pow(s2)
+        s1_t = torch.pow(s1, 3)
+        s2_t = torch.pow(s2, 3)
     else:
         raise ValueError(f"unknow strategy type: {strategy_type}")
 
