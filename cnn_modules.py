@@ -99,7 +99,7 @@ class DenseBlock(torch.nn.Module):
         super(DenseBlock, self).__init__()
         denseblock = []
         for i in range(repeat):
-            denseblock += DenseConv2d(in_channels * (i + 1), in_channels, kernel_size, stride)
+            denseblock.append(DenseConv2d(in_channels * (i + 1), in_channels, kernel_size, stride))
         self.denseblock = nn.Sequential(*denseblock)
 
     def forward(self, x):

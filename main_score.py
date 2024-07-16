@@ -68,9 +68,7 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             better_fusion_loss_value = mse_loss(score_fused_probs, union_mask)
             total_loss_value = quality_loss_value.item() + ssim_loss_value.item() + pixel_loss_value.item() + better_fusion_loss_value.item()
             test_loss += total_loss_value
-            logging.debug(
-                f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
-            )
+            logging.debug(f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}")
 
             # save test set results
             if write_result & epoch % args.save_result_interval == 0:
@@ -159,9 +157,7 @@ def train(trainloader, testloader):
                 Loss_ssim.append(ssim_loss_value.item())
                 Loss_pixel.append(pixel_loss_value.item())
                 Loss_fusion.append(better_fusion_loss_value.item())
-                logging.info(
-                    f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
-                )
+                logging.info(f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}")
 
                 # optimize decoder
                 optimizer_de.step()
@@ -174,9 +170,7 @@ def train(trainloader, testloader):
 
         # logging.info loss
         logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
-        logging.info(
-            f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}"
-        )
+        logging.info(f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}")
 
         # Get loss on the test set
         test_loss = test(encoder, decoder, testloader, epoch, write_result=True)
@@ -203,6 +197,7 @@ def train(trainloader, testloader):
 
 
 if __name__ == "__main__":
+    logging.info(args)
     # Fetch dataset
     tir_data_path = join_path(args.data_dir, "tir")
     oct_data_path = join_path(args.data_dir, "oct")

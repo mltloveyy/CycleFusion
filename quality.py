@@ -17,14 +17,14 @@ def get_mask(image: np.array) -> np.array:
     if len(contours) > 0:
         mask = np.zeros(image.shape, dtype=np.float32)
         largest_contour = max(contours, key=cv2.contourArea)
-        cv2.drawContours(mask, [largest_contour], 0, (1.0), -1)
+        cv2.fillPoly(mask, [largest_contour], (1.0))
     else:
         mask = np.ones(image.shape).astype(np.float32)
 
     return mask
 
 
-def calc_quality(image: np.array) -> np.array:
+def calc_quality(image: np.array, mask: np.array) -> np.array:
     assert image.ndim == 2
     assert image.dtype == np.uint8
     grady, gradx = np.gradient(image)
@@ -48,8 +48,8 @@ def calc_quality(image: np.array) -> np.array:
     eigv_min = ((a + b) - np.sqrt(pow(a - b, 2) + 4 * pow(c, 2))) / 2.0
 
     # compute mask
-    mask = get_mask(image)
-    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+    # mask = get_mask(image)
+    # roi = cv2.GaussianBlur(mask, (5, 5), 0)
 
     # compute ocl
     ocl = np.where(eigv_max < EPSILON, EPSILON, 1.0 - eigv_min / (eigv_max + EPSILON))
@@ -78,16 +78,26 @@ def calc_quality_torch(tensor: torch.Tensor) -> torch.Tensor:
 if __name__ == "__main__":
     import os
 
-    path = "images/tir"
-    for file in os.listdir(path):
-        file_path = os.path.join(path, file)
-        image = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
-        # score = calc_quality(image)
-        # score = (score * 255).astype(np.uint8)
-        # cv2.imwrite(file_path.replace(".bmp", ".jpg"), score)
-        mask = get_mask(image)
-        mask = (mask * 255).astype(np.uint8)
-        cv2.imwrite(file_path.replace(".bmp", ".jpg"), mask)
+    path = "images/raw/tir"
 
+    # gen mask
+    # for file in os.listdir(path):
+    #     file_path = os.path.join(path, file)
+    #     image = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
+    #     mask = get_mask(image)
+    #     mask = (mask * 255).astype(np.uint8)
+    #     cv2.imwrite(file_path.replace(".bmp", ".jpg"), mask)
+
+    # calc quality
+    for file in os.listdir(path):
+        bmp_path = os.path.join(path, file)
+        if bmp_path[-3:] == "bmp":
+            image = cv2.imread(bmp_path, cv2.IMREAD_UNCHANGED)
+            mask = cv2.imread(bmp_path.replace("bmp", "jpg"), cv2.IMREAD_UNCHANGED)
+            score = calc_quality(image, mask)
+            # score = (score * 255).astype(np.uint8)
+            cv2.imwrite(bmp_path.replace(".bmp", "_Q.jpg"), score)
+
+    # test torch
     # tensor = torch.rand(size=(4, 1, 256, 256), device="cuda")
     # score = calc_quality_torch(tensor)

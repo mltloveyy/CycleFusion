@@ -29,7 +29,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--batch_size",
-    default=2,
+    default=1,
     type=int,
     help="batch size for training",
 )
@@ -82,7 +82,7 @@ parser.add_argument(
 # Datasets
 parser.add_argument(
     "--data_dir",
-    default="images",
+    default="images/dataset2",
     type=str,
     help="input data directory",
 )

@@ -16,6 +16,7 @@
 - **2024/4/25**: 更新data_process.py, 添加测试程序
 - **2024/5/23**: 添加质量分数评估接口和测试程序, 完成main.py调试
 - **2024/6/17**: 完成main_score.py调试
+- **2024/7/16**: 调整data_process.py和quality.py
 
 ## Overview
 
