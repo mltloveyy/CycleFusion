@@ -52,13 +52,13 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             score_oct = data[3].to(device)
 
             # run the model on the test set to predict
-            f_tir, score_tir_probs = encoder(img_tir)
-            f_oct, score_oct_probs = encoder(img_oct)
+            f_tir, score_tir_probs = encoder(img_tir, True)
+            f_oct, score_oct_probs = encoder(img_oct, True)
             f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
             tir_rec = decoder(f_tir)
             oct_rec = decoder(f_oct)
             img_fused = decoder(f_fused)
-            _, score_fused_probs = encoder(img_fused)
+            _, score_fused_probs = encoder(img_fused, True)
             union_mask = torch.logical_or((score_tir < EPSILON), (score_oct < EPSILON))
 
             # calc loss
@@ -68,10 +68,12 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             better_fusion_loss_value = mse_loss(score_fused_probs, union_mask)
             total_loss_value = quality_loss_value.item() + ssim_loss_value.item() + pixel_loss_value.item() + better_fusion_loss_value.item()
             test_loss += total_loss_value
-            logging.debug(f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}")
+            logging.debug(
+                f"[Test loss] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+            )
 
             # save test set results
-            if write_result & epoch % args.save_result_interval == 0:
+            if write_result & epoch % args.save_interval == 0:
                 logging.info(f"save results at epoch={epoch}")
                 save_dir = join_path(args.output_dir, "validations")
                 create_dirs(save_dir)
@@ -122,7 +124,7 @@ def train(trainloader, testloader):
             _, score_oct_probs = encoder(img_oct, True)
 
             # encoder backward
-            quality_loss_value = mse_loss(score_tir_probs, score_tir) + mse_loss(score_oct_probs, score_oct)
+            quality_loss_value = 10 * (mae_loss(score_tir_probs, score_tir) + mae_loss(score_oct_probs, score_oct))
             encoder_loss = quality_loss_value
             encoder_loss.backward()
             Loss_quality.append(quality_loss_value.item())
@@ -141,7 +143,7 @@ def train(trainloader, testloader):
                 # decoder forward
                 f_tir, score_tir_probs = encoder(img_tir, True)
                 f_oct, score_oct_probs = encoder(img_oct, True)
-                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
+                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="exponential")
                 tir_rec = decoder(f_tir)
                 oct_rec = decoder(f_oct)
                 img_fused = decoder(f_fused)
@@ -150,14 +152,16 @@ def train(trainloader, testloader):
 
                 # decoder backward
                 ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
-                pixel_loss_value = mse_loss(tir_rec, img_tir) + mse_loss(oct_rec, img_oct)
+                pixel_loss_value = 10 * (mse_loss(tir_rec, img_tir) + mse_loss(oct_rec, img_oct))
                 better_fusion_loss_value = mse_loss(score_fused_probs, union_mask)
                 decoder_loss = ssim_loss_value + pixel_loss_value + better_fusion_loss_value
                 decoder_loss.backward()
                 Loss_ssim.append(ssim_loss_value.item())
                 Loss_pixel.append(pixel_loss_value.item())
                 Loss_fusion.append(better_fusion_loss_value.item())
-                logging.info(f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}")
+                logging.info(
+                    f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+                )
 
                 # optimize decoder
                 optimizer_de.step()
@@ -170,7 +174,9 @@ def train(trainloader, testloader):
 
         # logging.info loss
         logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
-        logging.info(f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}")
+        logging.info(
+            f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}"
+        )
 
         # Get loss on the test set
         test_loss = test(encoder, decoder, testloader, epoch, write_result=True)
@@ -224,8 +230,8 @@ if __name__ == "__main__":
         save_model(join_path(models_dir, f"final_enc.pth"), encoder)
         save_model(join_path(models_dir, f"final_dec.pth"), decoder)
     else:
-        encoder = DenseFuseEncoder()
-        decoder = DenseFuseDecoder()
+        encoder = CDDFuseEncoder()
+        decoder = CDDFuseDecoder()
         enc_model_path = args.pretrain_weight + "_enc.pth"
         dec_model_path = args.pretrain_weight + "_dec.pth"
         load_model(enc_model_path, encoder)

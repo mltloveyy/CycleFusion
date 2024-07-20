@@ -23,19 +23,19 @@ parser.add_argument(
 )
 parser.add_argument(
     "--epochs",
-    default=2,
+    default=200,
     type=int,
     help="number of training epochs",
 )
 parser.add_argument(
     "--batch_size",
-    default=1,
+    default=2,
     type=int,
     help="batch size for training",
 )
 parser.add_argument(
     "--lr",
-    default=1e-3,
+    default=1e-4,
     type=float,
     help="learning rate",
 )
@@ -56,7 +56,7 @@ parser.add_argument(
 # loss weights
 parser.add_argument(
     "--ssim_weight",
-    default=10.0,
+    default=1.0,
     type=float,
     help="ssim loss weight",
 )

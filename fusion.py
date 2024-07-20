@@ -10,6 +10,7 @@ def weight_fusion(
     s1: torch.Tensor,
     s2: torch.Tensor,
     strategy_type="weight",
+    temperature: float = 0.5,
 ) -> torch.Tensor:
     shape = f1.size()
 
@@ -17,8 +18,8 @@ def weight_fusion(
         s1_t = s1
         s2_t = s2
     elif strategy_type == "exponential":
-        s1_t = torch.exp(s1)
-        s2_t = torch.exp(s2)
+        s1_t = torch.exp(s1 / temperature)
+        s2_t = torch.exp(s2 / temperature)
     elif strategy_type == "power":
         s1_t = torch.pow(s1, 3)
         s2_t = torch.pow(s2, 3)
