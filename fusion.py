@@ -10,7 +10,7 @@ def weight_fusion(
     s1: torch.Tensor,
     s2: torch.Tensor,
     strategy_type="weight",
-    temperature: float = 0.5,
+    temperature: float = 3,
 ) -> torch.Tensor:
     shape = f1.size()
 

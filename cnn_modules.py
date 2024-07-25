@@ -83,7 +83,7 @@ class CBAM(nn.Module):
 class DenseConv2d(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
         super(DenseConv2d, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=kernel_size // 2)
         self.relu = nn.ReLU()
 
     def forward(self, x):

@@ -19,9 +19,9 @@ class DenseFuseEncoder(nn.Module):
         kernel_size = 3
         stride = 1
 
-        self.conv = nn.Conv2d(nb_filter[0], nb_filter[1], kernel_size, stride)  # [n,1,h,w] -> [n,16,h,w]
+        self.conv = nn.Conv2d(nb_filter[0], nb_filter[1], kernel_size, stride, padding=kernel_size // 2)  # [n,1,h,w] -> [n,16,h,w]
         self.DB = denseblock(nb_filter[1], kernel_size, stride, repeat)  # [n,16,h,w] -> [n,64,h,w]
-        self.score_conv = nn.Conv2d(2, 1, 7, 1, bias=False)
+        self.score_conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=7, stride=1, padding=3, bias=False)
         self.act = nn.Sigmoid()
 
     def forward(self, input):
@@ -66,19 +66,22 @@ class CDDFuseEncoder(nn.Module):
         self.baseFeature = BaseFeatureExtraction(dim=dim, num_heads=heads[2])
         self.detailFeature = DetailFeatureExtraction()
         self.score_head = nn.Sequential(
-            nn.Conv2d(dim * 2, dim, kernel_size=3, stride=1, padding=1, bias=bias),
-            nn.LeakyReLU(),
-            nn.Conv2d(dim, out_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            # nn.Conv2d(dim * 2, dim, kernel_size=3, stride=1, padding=1, bias=bias),
+            # nn.LeakyReLU(),
+            # nn.Conv2d(dim, out_channels, kernel_size=3, stride=1, padding=1, bias=bias),
+            # nn.Sigmoid(),
+            nn.Conv2d(dim, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
             nn.Sigmoid(),
         )
 
-    def forward(self, in_img, with_score=False):
+    def forward(self, in_img, with_score=True):
         in_enc_level1 = self.patch_embed(in_img)  # b*64*h*w
         out_enc_level1 = self.encoder_level1(in_enc_level1)  # b*64*h*w
         base_feature = self.baseFeature(out_enc_level1)  # b*64*h*w
         detail_feature = self.detailFeature(out_enc_level1)  # b*64*h*w
-        features = torch.cat((base_feature, detail_feature), dim=1)
+        features = torch.cat((base_feature, detail_feature), dim=1)  # b*128*h*w
         if with_score:
-            score = self.score_head(features)
+            # score = self.score_head(features)
+            score = self.score_head(detail_feature)  # use detail feature
             return features, score
         return features

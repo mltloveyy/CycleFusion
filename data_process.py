@@ -26,7 +26,7 @@ class Augmentation:
             [
                 v2.RandomHorizontalFlip(),
                 v2.RandomVerticalFlip(),
-                v2.RandomRotation(degrees=180, interpolation=v2.InterpolationMode.BILINEAR),
+                # v2.RandomRotation(degrees=180, interpolation=v2.InterpolationMode.BILINEAR),
                 v2.RandomCrop(size=(image_size, image_size)),
             ]
         )
@@ -45,6 +45,7 @@ class FingerPrint(Dataset):
         img_paths_tir: str,
         tir_root_dir: str,
         oct_root_dir: str,
+        image_size: int = 256,
         is_train: bool = True,
         with_score: bool = False,
     ):
@@ -52,7 +53,7 @@ class FingerPrint(Dataset):
         self.all_paths = []
         self.is_train = is_train
         self.with_score = with_score
-        self.augmentation = Augmentation(image_size=256, mean=[0], std=[1])
+        self.augmentation = Augmentation(image_size=image_size, mean=[0], std=[1])
 
         for img_path_tir in img_paths_tir:
             img_tir_basename = os.path.basename(img_path_tir)
@@ -71,8 +72,10 @@ class FingerPrint(Dataset):
                     self.all_paths.append([img_path_tir, img_path_oct])
 
     def __getitem__(self, index):
-        img_tir = color_invert(read_image(self.all_paths[index][0], True))
-        img_oct = color_invert(read_image(self.all_paths[index][1], True))
+        img_tir = read_image(self.all_paths[index][0], True)
+        img_oct = read_image(self.all_paths[index][1], True)
+        # img_tir = color_invert(img_tir)
+        # img_oct = color_invert(img_oct)
         if self.with_score:
             score_tir = read_image(self.all_paths[index][2])
             score_oct = read_image(self.all_paths[index][3])

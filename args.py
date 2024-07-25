@@ -10,6 +10,13 @@ parser.add_argument(
     help="run train or test",
 )
 parser.add_argument(
+    "--training_encoder",
+    default=True,
+    type=bool,
+    help="training encoder or decoder",
+)
+
+parser.add_argument(
     "--seed",
     default=40,
     type=int,
@@ -17,7 +24,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--pretrain_weight",
-    default="output/models/aaa",
+    default="output/20240724_234735/models/epoch101",
     type=str,
     help="pretrain weight",
 )
@@ -29,13 +36,13 @@ parser.add_argument(
 )
 parser.add_argument(
     "--batch_size",
-    default=2,
+    default=4,
     type=int,
     help="batch size for training",
 )
 parser.add_argument(
     "--lr",
-    default=1e-4,
+    default=1e-5,
     type=float,
     help="learning rate",
 )
@@ -55,14 +62,26 @@ parser.add_argument(
 
 # loss weights
 parser.add_argument(
+    "--quality_weight",
+    default=1.0,
+    type=float,
+    help="quality loss weight",
+)
+parser.add_argument(
     "--ssim_weight",
     default=1.0,
     type=float,
     help="ssim loss weight",
 )
 parser.add_argument(
+    "--pixel_weight",
+    default=1.0,
+    type=float,
+    help="pixel loss weight",
+)
+parser.add_argument(
     "--fuse_weight",
-    default=0.7,
+    default=1.0,
     type=float,
     help="fuse weight with tir in [0, 1]",
 )
