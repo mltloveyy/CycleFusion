@@ -19,7 +19,7 @@ from utils import *
 
 # Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPSILON = 1e-6
+EPSILON = 1e-4
 
 # Create output dir
 args = parser.parse_args()
@@ -55,28 +55,32 @@ def test(encoder, decoder, testloader, epoch, write_result=False):
             score_tir = data[2].to(device)
             score_oct = data[3].to(device)
 
-            quality_loss_value, ssim_loss_value, pixel_loss_value, better_fusion_loss_value = 0, 0, 0, 0
+            quality_loss_value, ssim_loss_value, restorm_loss_value, pixel_loss_value, better_fusion_loss_value = 0, 0, 0, 0, 0
 
             # run the model on the test set to predict
             f_tir, score_tir_probs = encoder(img_tir)
             f_oct, score_oct_probs = encoder(img_oct)
             quality_loss_value = args.quality_weight * (mae_loss(score_tir_probs, score_tir).item() + mae_loss(score_oct_probs, score_oct).item())
+            ssim_loss_value = args.ssim_weight * (ssim_loss(score_tir_probs, score_tir) + ssim_loss(score_oct_probs, score_oct))
             if decoder is not None:
                 f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
                 tir_rec = decoder(f_tir)
                 oct_rec = decoder(f_oct)
                 img_fused = decoder(f_fused)
                 _, score_fused_probs = encoder(img_fused)
-                union_mask = torch.logical_or((score_tir < EPSILON), (score_oct < EPSILON))
+                union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
+                # score_max = torch.maximum(score_tir, score_oct)
+                # union_mask = torch.clamp(1.2 * score_max, 0, 1)
 
-                ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir).item() + ssim_loss(oct_rec, img_oct).item())
+                restorm_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir).item() + ssim_loss(oct_rec, img_oct).item())
                 pixel_loss_value = args.pixel_weight * (mse_loss(tir_rec, img_tir).item() + mse_loss(oct_rec, img_oct).item())
+                # better_fusion_loss_value = args.fuse_weight * (mse_loss(score_fused_probs, union_mask).item() + ssim_loss(score_fused_probs, union_mask).item())
                 better_fusion_loss_value = args.fuse_weight * mse_loss(score_fused_probs, union_mask).item()
 
-            total_loss_value = quality_loss_value + ssim_loss_value + pixel_loss_value + better_fusion_loss_value
+            total_loss_value = quality_loss_value + restorm_loss_value + ssim_loss_value + pixel_loss_value + better_fusion_loss_value
             test_loss += total_loss_value
             logging.debug(
-                f"[Test loss] quality: {quality_loss_value:.5f} ssim: {ssim_loss_value:.5f} pixel: {pixel_loss_value:.5f} fusion: {better_fusion_loss_value:.5f}"
+                f"[Test loss] quality: {quality_loss_value:.5f} ssim: {ssim_loss_value:.5f} restorm: {restorm_loss_value:.5f} pixel: {pixel_loss_value:.5f} fusion: {better_fusion_loss_value:.5f}"
             )
 
             # save testset results
@@ -102,17 +106,19 @@ def train(trainloader, testloader):
     load_model(args.pretrain_weight + "_enc.pth", encoder)
     load_model(args.pretrain_weight + "_dec.pth", decoder)
 
-    optimizer_en = Adam(encoder.parameters(), lr=args.lr)
-    optimizer_de = Adam(decoder.parameters(), lr=args.lr)
-
     encoder = encoder.to(device)
     decoder = decoder.to(device)
 
     loss_minimum = 10000.0
-    Loss_quality, Loss_ssim, Loss_pixel, Loss_fusion = [], [], [], []
 
     for epoch in range(args.epochs):  # loop over the dataset multiple times
         logging.info(f"start training No.{epoch} epoch...")
+
+        Loss_quality, Loss_ssim, Loss_restorm, Loss_pixel, Loss_fusion = [], [], [], [], []
+
+        optimizer_en = Adam(encoder.parameters(), lr=args.lr)
+        optimizer_de = Adam(decoder.parameters(), lr=args.lr)
+
         start_epoch = time.time()
 
         for i, data in enumerate(trainloader):
@@ -132,9 +138,13 @@ def train(trainloader, testloader):
 
             # encoder backward
             quality_loss_value = args.quality_weight * (mae_loss(score_tir_probs, score_tir) + mae_loss(score_oct_probs, score_oct))
-            encoder_loss = quality_loss_value
+            ssim_loss_value = args.ssim_weight * (ssim_loss(score_tir_probs, score_tir) + ssim_loss(score_oct_probs, score_oct))
+            encoder_loss = quality_loss_value + ssim_loss_value
             encoder_loss.backward()
             Loss_quality.append(quality_loss_value.item())
+            Loss_ssim.append(ssim_loss_value.item())
+            writer.add_scalar("train_loss/quality", quality_loss_value.item(), epoch * len(trainloader) + i)
+            writer.add_scalar("train_loss/ssim", ssim_loss_value.item(), epoch * len(trainloader) + i)
 
             # optimize encoder
             optimizer_en.step()
@@ -150,24 +160,30 @@ def train(trainloader, testloader):
                 # decoder forward
                 f_tir, score_tir_probs = encoder(img_tir)
                 f_oct, score_oct_probs = encoder(img_oct)
-                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="exponential")
+                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type="power")
                 tir_rec = decoder(f_tir)
                 oct_rec = decoder(f_oct)
                 img_fused = decoder(f_fused)
                 _, score_fused_probs = encoder(img_fused)
                 union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
+                # score_max = torch.maximum(score_tir, score_oct)
+                # union_mask = torch.clamp(1.1 * score_max, 0, 1)
 
                 # decoder backward
-                ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
+                restorm_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
                 pixel_loss_value = args.pixel_weight * (mse_loss(tir_rec, img_tir) + mse_loss(oct_rec, img_oct))
+                # better_fusion_loss_value = args.fuse_weight * (mse_loss(score_fused_probs, union_mask) + ssim_loss(score_fused_probs, union_mask))
                 better_fusion_loss_value = args.fuse_weight * mse_loss(score_fused_probs, union_mask)
-                decoder_loss = ssim_loss_value + pixel_loss_value + better_fusion_loss_value
+                decoder_loss = restorm_loss_value + pixel_loss_value + better_fusion_loss_value
                 decoder_loss.backward()
-                Loss_ssim.append(ssim_loss_value.item())
+                Loss_restorm.append(restorm_loss_value.item())
                 Loss_pixel.append(pixel_loss_value.item())
                 Loss_fusion.append(better_fusion_loss_value.item())
+                writer.add_scalar("train_loss/restorm", restorm_loss_value.item(), epoch * len(trainloader) + i)
+                writer.add_scalar("train_loss/pixel", pixel_loss_value.item(), epoch * len(trainloader) + i)
+                writer.add_scalar("train_loss/fusion", better_fusion_loss_value.item(), epoch * len(trainloader) + i)
                 logging.info(
-                    f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+                    f"[Iter{i}] quality: {quality_loss_value.item():.5f} ssim: {ssim_loss_value.item():.5f} restorm: {restorm_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
                 )
 
                 # optimize decoder
@@ -179,26 +195,38 @@ def train(trainloader, testloader):
 
         end_epoch = time.time()
 
-        # logging.info loss
-        logging.info(f"epoch: {epoch+1} time_taken: {end_epoch - start_epoch:.3f}")
+        # logging.info cost
+        logging.info(f"epoch: {epoch} time_taken: {end_epoch - start_epoch:.3f}")
+        quality_mean = np.mean(np.array(Loss_quality))
+        ssim_mean = np.mean(np.array(Loss_ssim))
+        restorm_mean = np.mean(np.array(Loss_restorm))
+        pixel_mean = np.mean(np.array(Loss_pixel))
+        fusion_mean = np.mean(np.array(Loss_fusion))
         logging.info(
-            f"[Train loss] quality: {np.mean(np.array(Loss_quality)):.5f} ssim: {np.mean(np.array(Loss_ssim)):.5f} pixel: {np.mean(np.array(Loss_pixel)):.5f} fusion: {np.mean(np.array(Loss_fusion)):.5f}"
+            f"[Train loss] quality: {quality_mean:.5f} ssim: {ssim_mean:.5f} restorm: {restorm_mean:.5f} pixel: {pixel_mean:.5f} fusion: {fusion_mean:.5f}"
         )
+        train_loss = quality_mean + ssim_mean + restorm_mean + pixel_mean + fusion_mean
+        writer.add_scalar("train_loss", train_loss, epoch)
+        logging.info(f"[Train loss] {train_loss :.5f} minimum: {loss_minimum :.5f}")
+        if train_loss < loss_minimum:
+            loss_minimum = train_loss
+            best_epoch = epoch
 
         # Get loss on the test set
         test_loss = test(encoder, decoder, testloader, epoch, write_result=True)
-        if test_loss < loss_minimum:
-            loss_minimum = test_loss
-            best_epoch = epoch
-        logging.info(f"[Test loss] {test_loss :.5f} minimum: {loss_minimum :.5f}")
+        writer.add_scalar("test_loss", test_loss, epoch)
+        logging.info(f"[Test loss] {test_loss:.5f}")
 
-        # Condition for early stopping
+        # Condition for reduce lr and early stopping
         if epoch - best_epoch > args.patience:
-            logging.info(f"Early stopping at epoch {epoch}")
-            break
+            args.lr /= 10
+            logging.info(f"train loss does not drop, the learning rate will be reduced to {args.lr}")
+            if args.lr < 1e-5:
+                logging.info(f"Early stopping at epoch {epoch}")
+                break
 
         # Save checkpoints
-        if epoch > 5 & (epoch % args.save_interval == 0):
+        if (epoch > 10) & (epoch % args.save_interval == 0):
             models_dir = join_path(args.output_dir, "models")
             create_dirs(models_dir)
             save_model(join_path(models_dir, f"epoch{epoch}_enc.pth"), encoder)
@@ -217,7 +245,6 @@ def train_step(trainloader, testloader):
     if args.training_encoder:
         load_model(args.pretrain_weight + "_enc.pth", encoder)
         encoder = encoder.to(device)
-        optimizer = Adam(encoder.parameters(), lr=args.lr)
     else:
         # froze encoder
         encoder_path = args.pretrain_weight + "_enc.pth"
@@ -229,17 +256,20 @@ def train_step(trainloader, testloader):
             param.requires_grad = False
         decoder = CDDFuseDecoder()
         load_model(args.pretrain_weight + "_dec.pth", decoder)
-        optimizer = Adam(decoder.parameters(), lr=args.lr)
         decoder = decoder.to(device)
 
-    enc_inputs = (torch.from_numpy(np.random.rand(1, 1, args.image_size, args.image_size)).type(torch.FloatTensor).cuda(),)
-    writer.add_graph(encoder, enc_inputs)
-
     loss_minimum = 10000.0
-    Loss_quality, Loss_ssim, Loss_pixel, Loss_fusion = [], [], [], []
 
     for epoch in range(args.epochs):  # loop over the dataset multiple times
         logging.info(f"start training No.{epoch} epoch...")
+
+        Loss_quality, Loss_ssim, Loss_restorm, Loss_pixel, Loss_fusion = [], [], [], [], []
+
+        if args.training_encoder:
+            optimizer = Adam(encoder.parameters(), lr=args.lr)
+        else:
+            optimizer = Adam(decoder.parameters(), lr=args.lr)
+
         start_epoch = time.time()
 
         for i, data in enumerate(trainloader):
@@ -280,51 +310,70 @@ def train_step(trainloader, testloader):
                 img_fused = decoder(f_fused)
                 _, score_fused_probs = encoder(img_fused)
                 union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
+                # score_max = torch.maximum(score_tir, score_oct)
+                # union_mask = torch.clamp(1.2 * score_max, 0, 1)
 
                 # decoder backward
-                ssim_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
+                restorm_loss_value = args.ssim_weight * (ssim_loss(tir_rec, img_tir) + ssim_loss(oct_rec, img_oct))
                 pixel_loss_value = args.pixel_weight * (mse_loss(tir_rec, img_tir) + mse_loss(oct_rec, img_oct))
+                # better_fusion_loss_value = args.fuse_weight * (mse_loss(score_fused_probs, union_mask) + ssim_loss(score_fused_probs, union_mask))
                 better_fusion_loss_value = args.fuse_weight * mse_loss(score_fused_probs, union_mask)
-                decoder_loss = ssim_loss_value + pixel_loss_value + better_fusion_loss_value
+                decoder_loss = restorm_loss_value + pixel_loss_value + better_fusion_loss_value
                 decoder_loss.backward()
-                Loss_ssim.append(ssim_loss_value.item())
+                Loss_restorm.append(restorm_loss_value.item())
                 Loss_pixel.append(pixel_loss_value.item())
                 Loss_fusion.append(better_fusion_loss_value.item())
 
                 # optimize decoder
                 optimizer.step()
 
-                logging.info(f"[Iter{i}] ssim: {ssim_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}")
-                writer.add_scalar("train_loss/ssim", ssim_loss_value.item(), epoch * len(trainloader) + i)
+                logging.info(
+                    f"[Iter{i}] restorm: {restorm_loss_value.item():.5f} pixel: {pixel_loss_value.item():.5f} fusion: {better_fusion_loss_value.item():.5f}"
+                )
+                writer.add_scalar("train_loss/restorm", restorm_loss_value.item(), epoch * len(trainloader) + i)
                 writer.add_scalar("train_loss/pixel", pixel_loss_value.item(), epoch * len(trainloader) + i)
                 writer.add_scalar("train_loss/fusion", better_fusion_loss_value.item(), epoch * len(trainloader) + i)
 
         end_epoch = time.time()
 
-        # logging.info loss
+        # logging.info cost
         logging.info(f"epoch: {epoch} time_taken: {end_epoch - start_epoch:.3f}")
+        if args.training_encoder:
+            quality_mean = np.mean(np.array(Loss_quality))
+            ssim_mean = np.mean(np.array(Loss_ssim))
+            logging.info(f"[Train loss] quality: {quality_mean:.5f} ssim: {ssim_mean:.5f}")
+            train_loss = quality_mean + ssim_mean
+        else:
+            restorm_mean = np.mean(np.array(Loss_restorm))
+            pixel_mean = np.mean(np.array(Loss_pixel))
+            fusion_mean = np.mean(np.array(Loss_fusion))
+            logging.info(f"[Train loss] restorm: {restorm_mean:.5f} pixel: {pixel_mean:.5f} fusion: {fusion_mean:.5f}")
+            train_loss = restorm_mean + pixel_mean + fusion_mean
+        writer.add_scalar("train_loss", train_loss, epoch)
+        logging.info(f"[Train loss] {train_loss :.5f} minimum: {loss_minimum :.5f}")
+        if train_loss < loss_minimum:
+            loss_minimum = train_loss
+            best_epoch = epoch
 
         # Get loss on the test set
         test_loss = test(encoder, decoder, testloader, epoch, write_result=True)
-        if test_loss < loss_minimum:
-            loss_minimum = test_loss
-            best_epoch = epoch
-        logging.info(f"[Test loss] {test_loss :.5f} minimum: {loss_minimum :.5f}")
         writer.add_scalar("test_loss", test_loss, epoch)
+        logging.info(f"[Test loss] {test_loss:.5f}")
 
-        # Condition for early stopping
-        # if epoch - best_epoch > args.patience:
-        #     logging.info(f"Early stopping at epoch {epoch}")
-        #     break
+        # Condition for reduce lr and early stopping
+        if epoch - best_epoch > args.patience:
+            args.lr /= 10
+            logging.info(f"train loss does not drop, the learning rate will be reduced to {args.lr}")
+            if args.lr < 1e-5:
+                logging.info(f"Early stopping at epoch {epoch}")
+                break
 
         # Save checkpoints
-        if epoch > 5 & (epoch % args.save_interval == 0):
+        if (epoch > 10) & (epoch % args.save_interval == 0):
             models_dir = join_path(args.output_dir, "models")
             create_dirs(models_dir)
-            if args.training_encoder:
-                save_model(join_path(models_dir, f"epoch{epoch}_enc.pth"), encoder)
-            else:
-                save_model(join_path(models_dir, f"epoch{epoch}_dec.pth"), decoder)
+            save_model(join_path(models_dir, f"epoch{epoch}_enc.pth"), encoder)
+            save_model(join_path(models_dir, f"epoch{epoch}_dec.pth"), decoder)
 
         logging.info("========================================")
 
@@ -351,16 +400,20 @@ if __name__ == "__main__":
         testloader = DataLoader(test_set, batch_size=1, shuffle=False)
 
         # Train models
-        # encoder, decoder = train(trainloader, testloader)
-        encoder, decoder = train_step(trainloader, testloader)
-
-        # Save models
+        encoder, decoder = train(trainloader, testloader)
         models_dir = join_path(args.output_dir, "models")
         create_dirs(models_dir)
-        if args.training_encoder:
-            save_model(join_path(models_dir, f"final_enc.pth"), encoder)
-        else:
-            save_model(join_path(models_dir, f"final_dec.pth"), decoder)
+        save_model(join_path(models_dir, f"final_enc.pth"), encoder)
+        save_model(join_path(models_dir, f"final_dec.pth"), decoder)
+
+        # train step
+        # encoder, decoder = train_step(trainloader, testloader)
+        # models_dir = join_path(args.output_dir, "models")
+        # create_dirs(models_dir)
+        # if args.training_encoder:
+        #     save_model(join_path(models_dir, f"final_enc.pth"), encoder)
+        # else:
+        #     save_model(join_path(models_dir, f"final_dec.pth"), decoder)
     else:
         encoder = CDDFuseEncoder()
         decoder = CDDFuseDecoder()

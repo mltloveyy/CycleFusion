@@ -11,7 +11,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--training_encoder",
-    default=True,
+    default=False,
     type=bool,
     help="training encoder or decoder",
 )
@@ -24,7 +24,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--pretrain_weight",
-    default="output/20240724_234735/models/epoch101",
+    default="output/xxx/models/epochxx",
     type=str,
     help="pretrain weight",
 )
@@ -36,27 +36,27 @@ parser.add_argument(
 )
 parser.add_argument(
     "--batch_size",
-    default=4,
+    default=2,
     type=int,
     help="batch size for training",
 )
 parser.add_argument(
     "--lr",
-    default=1e-5,
+    default=1e-3,
     type=float,
     help="learning rate",
 )
 parser.add_argument(
     "--critic",
-    default=2,
+    default=5,
     type=int,
     help="train deformer and fuser at integer multiples of n",
 )
 parser.add_argument(
     "--patience",
-    default=5,
+    default=10,
     type=int,
-    help="training will stop when the validation loss does not improve for this many epochs",
+    help="Reduce the learning rate when the train loss does not drop for this many epochs",
 )
 
 
@@ -127,7 +127,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--save_interval",
-    default=5,
+    default=2,
     type=int,
     help="save test results at integer multiples of n",
 )

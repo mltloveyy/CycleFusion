@@ -26,8 +26,14 @@ def weight_fusion(
     else:
         raise ValueError(f"unknow strategy type: {strategy_type}")
 
-    w1 = s1_t / (s1_t + s2_t + EPSILON)
-    w2 = s2_t / (s1_t + s2_t + EPSILON)
+    mask = (s1_t < 1e-3) & (s2_t < 1e-3)
+    w1 = s1_t / (s1_t + s2_t)
+    w2 = s2_t / (s1_t + s2_t)
+    w1 = torch.where(mask, 0.5 * torch.ones_like(w1), w1)
+    w2 = torch.where(mask, 0.5 * torch.ones_like(w2), w2)
+
+    # w1 = s1_t / (s1_t + s2_t + EPSILON)
+    # w2 = s2_t / (s1_t + s2_t + EPSILON)
 
     w1 = w1.repeat(1, shape[1], 1, 1)
     w2 = w2.repeat(1, shape[1], 1, 1)

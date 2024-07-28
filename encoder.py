@@ -70,7 +70,7 @@ class CDDFuseEncoder(nn.Module):
             # nn.LeakyReLU(),
             # nn.Conv2d(dim, out_channels, kernel_size=3, stride=1, padding=1, bias=bias),
             # nn.Sigmoid(),
-            nn.Conv2d(dim, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
+            nn.Conv2d(dim * 2, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
             nn.Sigmoid(),
         )
 
@@ -81,7 +81,7 @@ class CDDFuseEncoder(nn.Module):
         detail_feature = self.detailFeature(out_enc_level1)  # b*64*h*w
         features = torch.cat((base_feature, detail_feature), dim=1)  # b*128*h*w
         if with_score:
-            # score = self.score_head(features)
-            score = self.score_head(detail_feature)  # use detail feature
+            score = self.score_head(features)
+            # score = self.score_head(detail_feature)  # use detail feature
             return features, score
         return features
