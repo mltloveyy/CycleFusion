@@ -14,7 +14,7 @@ class ConvActNorm(nn.Sequential):
         use_relu=True,
         use_bn=True,
     ):
-        conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, bias=False)
+        conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=kernel_size // 2, bias=False)
         if use_relu:
             act = nn.ReLU(inplace=True)
         else:

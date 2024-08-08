@@ -51,6 +51,7 @@ class FingerPrint(Dataset):
     ):
         super().__init__()
         self.all_paths = []
+        self.filenames = []
         self.is_train = is_train
         self.with_score = with_score
         self.augmentation = Augmentation(image_size=image_size, mean=[0], std=[1])
@@ -63,6 +64,7 @@ class FingerPrint(Dataset):
             img_path_oct = os.path.join(oct_root_dir, img_oct_basename)
             score_path_tir = os.path.join(tir_root_dir, score_tir_basename)
             score_path_oct = os.path.join(oct_root_dir, score_oct_basename)
+            self.filenames.append(img_tir_basename.split(".")[0])
 
             if self.with_score:
                 if os.path.exists(img_path_oct) and os.path.exists(score_path_tir) and os.path.exists(score_path_oct):
@@ -105,9 +107,3 @@ if __name__ == "__main__":
             save_tensor(data[3], f"{epoch}_{i}_oct_Q.jpg")
             if i > test_num:
                 break
-
-    # rename image
-    # path = "images/oct"
-    # for filename in os.listdir(path):
-    #     new_filename = filename.replace("W", "F")
-    #     os.rename(os.path.join(path, filename), os.path.join(path, new_filename))

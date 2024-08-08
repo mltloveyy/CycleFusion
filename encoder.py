@@ -27,8 +27,8 @@ class DenseFuseEncoder(nn.Module):
     def forward(self, input):
         f = self.conv(input)
         f = self.DB(f)
-        f = torch.cat([torch.mean(f, 1, keepdim=True), torch.max(f, 1, keepdim=True)[0]], 1)
-        score = self.score_conv(f)
+        score = torch.cat([torch.mean(f, 1, keepdim=True), torch.max(f, 1, keepdim=True)[0]], 1)
+        score = self.score_conv(score)
         score = self.act(score)
         return f, score
 

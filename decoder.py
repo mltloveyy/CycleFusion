@@ -1,8 +1,8 @@
-import torch
 import torch.nn as nn
 
 from CDDFuse.net import TransformerBlock
 from cnn_modules import ConvActNorm
+from fusion import FeatureFusion
 
 
 # from densefuse
@@ -12,10 +12,10 @@ class DenseFuseDecoder(nn.Module):
         dims = [64, 32, 16, 1]
 
         # decoder
-        self.conv1 = ConvActNorm(dims[0], dims[0], 3, 1)
-        self.conv2 = ConvActNorm(dims[0], dims[1], 3, 1)
-        self.conv3 = ConvActNorm(dims[1], dims[2], 3, 1)
-        self.conv4 = nn.Conv2d(dims[2], dims[3], 3, 1, 1)
+        self.conv1 = ConvActNorm(dims[0], dims[0], kernel_size=3, stride=1)
+        self.conv2 = ConvActNorm(dims[0], dims[1], kernel_size=3, stride=1)
+        self.conv3 = ConvActNorm(dims[1], dims[2], kernel_size=3, stride=1)
+        self.conv4 = nn.Conv2d(dims[2], dims[3], kernel_size=3, stride=1, padding=1)
         self.act = nn.Sigmoid()
 
     def forward(self, f):
@@ -61,9 +61,14 @@ class CDDFuseDecoder(nn.Module):
             nn.Conv2d(int(dim) // 2, out_channels, kernel_size=3, stride=1, padding=1, bias=bias),
         )
         self.sigmoid = nn.Sigmoid()
+        self.fusion = FeatureFusion(dim * 4)
 
-    def forward(self, features, inp_img=None):
-        out_enc_level0 = self.reduce_channel(features)
+    def forward(self, f1, f2=None, inp_img=None):
+        if f2 is not None:
+            out = self.fusion(f1, f2)
+        else:
+            out = f1
+        out_enc_level0 = self.reduce_channel(out)
         out_enc_level1 = self.encoder_level2(out_enc_level0)
         if inp_img is not None:
             out_enc_level1 = self.output(out_enc_level1) + inp_img
