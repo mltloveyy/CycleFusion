@@ -77,23 +77,31 @@ def eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type: str):
             start = time.time()
             f_tir, q_probs_tir = encoder(t_tir)
             f_oct, q_probs_oct = encoder(t_oct)
-            f_fused = weight_fusion(f_tir, f_oct, q_probs_tir, q_probs_oct, strategy_type=fuse_type)
-            t_fused = decoder(f_fused)
-            _, q_probs_fused = encoder(t_fused)
+            if fuse_type == "conv":
+                t_fused = decoder(f_tir, f_oct)
+            else:
+                f_fused = weight_fusion(f_tir, f_oct, q_probs_tir, q_probs_oct, strategy_type=fuse_type)
+                t_fused = decoder(f_fused)
             cost += time.time() - start
             count += 1
-
+            # only fused image
             path_output = join_path(dir_output, img_name)
-            img_outputs = torch.cat((t_tir, t_oct, t_fused), dim=-1)
-            score_outputs = torch.cat((q_probs_tir, q_probs_oct, q_probs_fused), dim=-1)
-            outputs = torch.cat((img_outputs, score_outputs), dim=-2).cpu()
-            save_tensor(outputs.detach(), path_output)
+            save_tensor(t_fused.cpu().detach(), path_output)
+            # all outputs
+            # _, q_probs_fused = encoder(t_fused)
+            # img_outputs = torch.cat((t_tir, t_oct, t_fused), dim=-1)
+            # score_outputs = torch.cat((q_probs_tir, q_probs_oct, q_probs_fused), dim=-1)
+            # outputs = torch.cat((img_outputs, score_outputs), dim=-2).cpu()
+            # path_output = join_path(dir_output, img_name)
+            # save_tensor(outputs.detach(), path_output)
     return cost / count
 
 
 if __name__ == "__main__":
-
-    model_base = "output/20240805_173253/models/final"
+    model_base = "output/20240814_024325/models/epoch40"
+    data_dir = "experiment/raw_data/738"
+    dir_output = "experiment/results/738_cdd_add_new2"
+    create_dirs(dir_output)
 
     encoder = CDDFuseEncoder()
     load_model(model_base + "_enc.pth", encoder)
@@ -105,14 +113,11 @@ if __name__ == "__main__":
     decoder.to(device)
     decoder.eval()
 
-    data_dir = "images/dataset4/"
     dir_tir = data_dir + "/tir"
     dir_oct = data_dir + "/oct"
-    dir_output = data_dir + "/ours"
-    create_dirs(dir_output)
 
     # fuse
-    fuse_type = "pow"  # add, pow, exp
+    fuse_type = "add"  # add, pow, exp, conv
     cost = eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type)
 
     # restore
@@ -122,22 +127,3 @@ if __name__ == "__main__":
     # cost = eval_quality(encoder, dir_tir, dir_output)
 
     print(f"Average time: {cost}s")
-
-
-# if __name__ == "__main__":
-#     dir_input = "images/LowQualityFingerprint738/TIR"
-#     dir_output = "images/LowQualityFingerprint738/TIR_enhanced"
-#     create_dirs(dir_output)
-
-#     for i, img_name in enumerate(os.listdir(dir_input)):
-#         if not img_name.endswith(".bmp"):
-#             continue
-
-#         path_input = join_path(dir_input, img_name)
-#         path_fused = join_path(dir_output, img_name)
-
-#         img_input = cv2.imread(path_input, cv2.IMREAD_UNCHANGED) / 255.0
-#         img_output = np.log(1 + img_input)
-#         img_output = (img_output * 255).astype(np.uint8) + 60
-
-#         cv2.imwrite(path_fused, img_output)

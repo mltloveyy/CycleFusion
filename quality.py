@@ -9,7 +9,7 @@ EPSILON = 1e-6
 def get_mask(image: np.array, morph_kernel: int = 5, return_draw: bool = False) -> np.array:
     _, binary = cv2.threshold(image, 130, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # 闭操作(先膨胀后腐蚀)
+    # close operate
     close = cv2.dilate(binary, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel)))
     close = cv2.erode(close, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel)))
 
@@ -72,7 +72,7 @@ def calc_quality(image: np.array, mask: np.array = None, morph_kernel: int = 5) 
     coh = (eigv_max - eigv_min) / (eigv_max + eigv_min + EPSILON)
     coh = coh * mask
 
-    score = sc #ocl
+    score = sc  # ocl
 
     return score
 

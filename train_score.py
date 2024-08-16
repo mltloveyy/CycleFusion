@@ -64,16 +64,20 @@ def test(encoder, decoder, test_set: FingerPrint, epoch, write_result=False):
             f_oct, score_oct_probs = encoder(img_oct)
             tir_rec = decoder(f_tir)
             oct_rec = decoder(f_oct)
-            img_fused = decoder(f_tir, f_oct)
-            _, score_fused_probs = encoder(img_fused)
 
             quality_loss_value = args.quality_weight * (quality_loss(score_tir_probs, score_tir).item() + quality_loss(score_oct_probs, score_oct).item())
             restore_loss_value = args.restore_weight * (restore_loss(tir_rec, img_tir).item() + restore_loss(oct_rec, img_oct).item())
             if args.with_better:
+                img_fused = decoder(f_tir, f_oct)
+                _, score_fused_probs = encoder(img_fused)
                 union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
                 score_max = torch.maximum(score_tir, score_oct)
                 union_mask = torch.clamp(1.2 * union_mask * score_max, 0, 1)
                 fuse_loss_value = args.fuse_weight * (fuse_loss(score_fused_probs, union_mask).item() + fuse_loss(score_fused_probs, union_mask).item())
+            else:
+                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type=args.fuse_type)
+                img_fused = decoder(f_fused)
+                _, score_fused_probs = encoder(img_fused)
 
             total_loss_value = quality_loss_value + restore_loss_value + fuse_loss_value
             test_loss += total_loss_value
@@ -194,8 +198,8 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
                 f_oct, score_oct_probs = encoder(img_oct)
                 tir_rec = decoder(f_tir)
                 oct_rec = decoder(f_oct)
-                img_fused = decoder(f_tir, f_oct)
                 if args.with_better:
+                    img_fused = decoder(f_tir, f_oct)
                     _, score_fused_probs = encoder(img_fused)
                     union_mask = torch.logical_or((score_tir > EPSILON), (score_oct > EPSILON)).float()
                     score_max = torch.maximum(score_tir, score_oct)
