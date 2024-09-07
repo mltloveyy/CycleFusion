@@ -18,6 +18,7 @@ def copy(src, dst):
         shutil.copy2(src, dst)
 
 
+# 类内匹配, e.g. m组数据, 每组n个
 def det_list_internal(img_dir, output_dir):
     img_list = os.listdir(img_dir)
     list_file = open(output_dir + "/list.txt", "w")
@@ -36,12 +37,14 @@ def det_list_internal(img_dir, output_dir):
     det_list_file = open(output_dir + "/det_list.txt", "w")
 
     for i, p in enumerate(counts.values()):
+        # 真匹配: 组内互相计算 (n*(n-1)/2)*m
         for j, name1 in enumerate(p):
             for name2 in p[j + 1 :]:
                 list_line = f"{name1},{name2}\n"
                 det_list_file.write(list_line)
                 label_file.write("1\n")
 
+        # 假匹配: 组间随机选出一个计算 m*(m-1)/2
         random.shuffle(p)
         len_p = len(p)
         list_counts = list(counts.values())[i + 1 :]
@@ -52,7 +55,8 @@ def det_list_internal(img_dir, output_dir):
             label_file.write("0\n")
 
 
-def det_list_cross(img_dir1, img_dir2, ext1, ext2, output_dir):
+# 混合匹配, e.g. m组数据, 每组n个
+def det_list_mixture(img_dir1, img_dir2, ext1, ext2, output_dir):
     img_list = os.listdir(img_dir1)
     counts = {}
     for name in img_list:
@@ -71,6 +75,7 @@ def det_list_cross(img_dir1, img_dir2, ext1, ext2, output_dir):
     det_list_file = open(output_dir + f"/det_list.txt", "w")
 
     for i, p in enumerate(counts.values()):
+        # 真匹配: 与对应组的其他数据进行计算 (n*(n-1)/2)*m
         for j, name1 in enumerate(p):
             for name2 in p[j + 1 :]:
                 new_name1 = name1.replace(".bmp", "_" + ext1 + ".bmp")
@@ -81,6 +86,7 @@ def det_list_cross(img_dir1, img_dir2, ext1, ext2, output_dir):
                 copy(os.path.join(img_dir1, name1), os.path.join(dst_dir, new_name1))
                 copy(os.path.join(img_dir2, name2), os.path.join(dst_dir, new_name2))
 
+        # 假匹配: 与除对应组之外的其他组中随机选出一个计算 m*(m-1)/2
         random.shuffle(p)
         len_p = len(p)
         list_counts = list(counts.values())[i + 1 :]
@@ -105,7 +111,7 @@ if __name__ == "__main__":
     #     os.mkdir(output_dir)
     # det_list_internal(img_dir, output_dir)
 
-    # cross
+    # mixture
     data_dir = "../images"
     dataset = "data1"
     ext1 = "tir"
@@ -115,4 +121,4 @@ if __name__ == "__main__":
     output_dir = os.path.join(dataset, f"{ext1}_{ext2}")
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    det_list_cross(img_dir1, img_dir2, ext1, ext2, output_dir)
+    det_list_mixture(img_dir1, img_dir2, ext1, ext2, output_dir)

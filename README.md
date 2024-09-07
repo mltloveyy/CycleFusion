@@ -9,6 +9,10 @@
 - scipy
 - timm
 - einops
+- matplotlib
+- scikit-learn
+- scikit-image
+- pandas
 
 ## Updates
 

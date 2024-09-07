@@ -1,4 +1,8 @@
 __pycache__
-images
+.vscode
+datasets
 output
 *.vsdx
+experiments/det
+experiments/nfiq
+experiments/results
