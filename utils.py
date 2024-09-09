@@ -37,7 +37,7 @@ def save_tensor(tensor: torch.Tensor, path: str):
 
 def load_model(path: str, model):
     if os.path.exists(path):
-        model.load_state_dict(torch.load(path))
+        model.load_state_dict(torch.load(path, map_location="cpu"))
         print(f"load model state dict from {path}")
 
 
