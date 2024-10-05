@@ -75,8 +75,11 @@ def test(encoder, decoder, test_set: FingerPrint, epoch, write_result=False):
                 union_mask = torch.clamp(1.2 * union_mask * score_max, 0, 1)
                 fuse_loss_value = args.fuse_weight * (fuse_loss(score_fused_probs, union_mask).item() + fuse_loss(score_fused_probs, union_mask).item())
             else:
-                f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type=args.fuse_type)
-                img_fused = decoder(f_fused)
+                img_fused = decoder(f_tir, f_oct)
+                fuse_loss_value = args.fuse_weight * (gradient_loss(img_tir, img_fused) + gradient_loss(img_oct, img_fused)).item()
+                
+                # f_fused = weight_fusion(f_tir, f_oct, score_tir_probs, score_oct_probs, strategy_type=args.fuse_type)
+                # img_fused = decoder(f_fused)
                 _, score_fused_probs = encoder(img_fused)
 
             total_loss_value = quality_loss_value + restore_loss_value + fuse_loss_value
@@ -218,13 +221,28 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
                         f"[Iter{i}] quality: {quality_loss_value.item():.5f} restore: {restore_loss_value.item():.5f} fuse: {fuse_loss_value.item():.5f}"
                     )
                 else:
+                    img_fused = decoder(f_tir, f_oct)
+                    
                     # decoder backward
                     restore_loss_value = args.restore_weight * (restore_loss(tir_rec, img_tir) + restore_loss(oct_rec, img_oct))
-                    decoder_loss = restore_loss_value
+                    fuse_loss_value = args.fuse_weight * (gradient_loss(img_tir, img_fused) + gradient_loss(img_oct, img_fused))
+                    decoder_loss = restore_loss_value + fuse_loss_value
                     decoder_loss.backward()
                     Loss_restore.append(restore_loss_value.item())
+                    Loss_fuse.append(fuse_loss_value.item())
                     writer.add_scalar("train_loss/restore", restore_loss_value.item(), epoch * len(trainloader) + i)
-                    logging.info(f"[Iter{i}] quality: {quality_loss_value.item():.5f} restore: {restore_loss_value.item():.5f}")
+                    writer.add_scalar("train_loss/fuse", fuse_loss_value.item(), epoch * len(trainloader) + i)
+                    logging.info(
+                        f"[Iter{i}] quality: {quality_loss_value.item():.5f} restore: {restore_loss_value.item():.5f} fuse: {fuse_loss_value.item():.5f}"
+                    )
+                    
+                    # decoder backward
+                    # restore_loss_value = args.restore_weight * (restore_loss(tir_rec, img_tir) + restore_loss(oct_rec, img_oct))
+                    # decoder_loss = restore_loss_value
+                    # decoder_loss.backward()
+                    # Loss_restore.append(restore_loss_value.item())
+                    # writer.add_scalar("train_loss/restore", restore_loss_value.item(), epoch * len(trainloader) + i)
+                    # logging.info(f"[Iter{i}] quality: {quality_loss_value.item():.5f} restore: {restore_loss_value.item():.5f}")
 
                 # optimize decoder
                 optimizer_de.step()

@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from CDDFuse.net import BaseFeatureExtraction, DetailFeatureExtraction
+
 EPSILON = 1e-6
 
 
@@ -56,3 +58,15 @@ class FeatureFusion(nn.Module):
         map = map.repeat(1, shape[1], 1, 1)
         out = map * f1 + (1 - map) * f2
         return out
+
+
+class CDDFuseFuser(nn.Module):
+    def __init__(self):
+        super(CDDFuseFuser, self).__init__()
+        self.base_fuser = BaseFeatureExtraction(dim=64, num_heads=8)
+        self.detail_fuser = DetailFeatureExtraction(num_layers=1)
+
+    def forward(self, f_base, f_detail):
+        f_base = self.base_fuser(f_base)
+        f_detail = self.detail_fuser(f_detail)
+        return f_base, f_detail
