@@ -11,16 +11,18 @@ config = {
 rcParams.update(config)
 
 if __name__ == "__main__":
-    file_path = "summary_ablation.xlsx"
-    sheet_name = "738"
+    file_path = "nfiq/summary_contrast.xlsx"
+    sheet_name = "1208"
 
     df = pd.read_excel(file_path, sheet_name=sheet_name)
 
-    # df = df.drop(["NSST"], axis=1)
+    df = df.drop(["NSST"], axis=1)
 
     # 获取DataFrame的列名和数据
     labels = df.columns
     data = df.values  # 直接使用整个DataFrame的数据
+
+    plt.figure(figsize=(7, 6))
 
     # 绘制箱型图
     plt.boxplot(

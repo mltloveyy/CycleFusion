@@ -8,25 +8,52 @@ from sklearn.metrics import roc_curve
 
 config = {
     "font.family": "Times New Roman",
-    "font.size": 13.0,
+    "font.size": 14.0,
     "axes.unicode_minus": False,
 }  # 设置字体类型
 rcParams.update(config)
 
 # contrast
-contrast_methods = ["TIR.txt", "OCT.txt", "NSST.txt", "DTNP-NSCT.txt", "Darlow's fusion.txt", "CSMCA-SHD.txt", "DenseFuse.txt", "Proposed.txt"]
-contrast_show = [m.split(".")[0] for m in contrast_methods]
+contrast_methods = [
+    "TIR.txt",
+    "OCT.txt",
+    "DTNP-NSCT.txt",
+    "Darlow's fusion.txt",
+    "CSMCA-SHD.txt",
+    "DenseFuse.txt",
+    "CDDFuse.txt",
+    "Proposed.txt",
+]
+contrast_show = [
+    "External",
+    "Internal",
+    "DTNP-NSCT",
+    "Darlow's fusion",
+    "CSMCA-SHD",
+    "DenseFuse",
+    "CDDFuse",
+    "Proposed",
+]
 
 # ablation
 ablation_methods = [
     "cddfuse_add.txt",
     "cddfuse_weight.txt",
+    "cddfuse_gradloss.txt",
     "densefuse_network_better.txt",
     "cddfuse(onlygfe)_network_better.txt",
     "cddfuse(onlydfe)_network_better.txt",
     "cddfuse_network_better.txt",
 ]
-ablation_show = ["w/o quality-driven", "w/o fusion strategy", "hybrid Enc → CNN Enc", "w/o DFE", "w/o GFE", "Proposed"]
+ablation_show = [
+    "w/o quality-driven",
+    "w/o fusion strategy",
+    "w/o quality loss",
+    "hybrid Enc → CNN Enc",
+    "w/o DFE",
+    "w/o GFE",
+    "Proposed",
+]
 
 # mixture
 mixture_methods = ["Internal&External.txt", "External&fusion.txt", "Internal&fusion.txt"]
@@ -43,12 +70,13 @@ marker_types = ["o", "v", "x", "s", "*", "^", "p", "d"]
 
 if __name__ == "__main__":
 
-    drop_list = ["NSST"]
-    benefitPath = r"D:\code\pytorch\CycleFusion\experiments\det\ablation_738"
-    labelPath = r"D:\code\pytorch\CycleFusion\experiments\det\label_738.txt"
+    benefitPath = r"D:\code\pytorch\CycleFusion\experiments\det\contrast_1208"
+    labelPath = r"D:\code\pytorch\CycleFusion\experiments\det\label_1208.txt"
 
-    methods = ablation_methods
-    show = ablation_show
+    methods = contrast_methods
+    show = contrast_show
+
+    plt.figure(figsize=(8, 6))
 
     # label
     with open(labelPath, "r") as f:
@@ -58,8 +86,6 @@ if __name__ == "__main__":
 
     for i, method in enumerate(methods):
         name = show[i]
-        if name in drop_list:
-            continue
         lists = []
         with open(os.path.join(benefitPath, method), "r") as f:
             content = f.read()
@@ -78,10 +104,10 @@ if __name__ == "__main__":
 
     # plt.title("DET Curve")
     plt.legend(loc="lower left")  # upper right, lower left
-    plt.xlim([0.0001, 1])
-    plt.ylim([0.001, 1])
-    # plt.xlim([0.00001, 0.1])
-    # plt.ylim([0.0001, 0.1])
+    plt.xlim([0.00001, 0.1])
+    plt.ylim([0.0001, 0.1])
+    # plt.xlim([0.0001, 1])
+    # plt.ylim([0.001, 1])
 
     plt.xlabel("FMR")
     plt.ylabel("FNMR")  # 可以使用中文，但需要导入一些库即字体

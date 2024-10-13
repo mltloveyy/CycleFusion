@@ -3,10 +3,5 @@ __pycache__
 datasets
 output
 *.vsdx
-experiments/det
-experiments/indices
-experiments/heatmap
-experiments/nfiq
 experiments/results
-experiments/ablative
 images
