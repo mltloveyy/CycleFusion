@@ -35,12 +35,22 @@ def save_tensor(tensor: torch.Tensor, path: str):
     print(f"save tensor at {path}")
 
 
-def load_model(path: str, model):
+def load_model(path: str, model: torch.nn.Module, name: str = None):
     if os.path.exists(path):
-        model.load_state_dict(torch.load(path, map_location="cpu"))
-        print(f"load model state dict from {path}")
+        ckpt = torch.load(path, map_location="cpu")
+        if name is not None:
+            model.load_state_dict(ckpt[name])
+            print(f"load {name} model state dict from {path}")
+        else:
+            model.load_state_dict(ckpt)
+            print(f"load model state dict from {path}")
 
 
-def save_model(path: str, model):
+def save_model(path: str, model: torch.nn.Module):
     torch.save(model.state_dict(), path)
     print(f"save model state dict at {path}")
+
+
+def save_models(path: str, models_state: dict):
+    torch.save(models_state, path)
+    print(f"save models state dict at {path}")

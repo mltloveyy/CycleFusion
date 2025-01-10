@@ -11,45 +11,27 @@ from torch.utils.tensorboard import SummaryWriter
 
 from args import parser
 from data_process import FingerPrint
-from decoder import CDDFuseDecoder, DenseFuseDecoder
-from encoder import CDDFuseEncoder, DenseFuseEncoder
-from fusion import CDDFuseFuser, weight_fusion
+from decoder import CDDFuseDecoder
+from encoder import CDDFuseEncoder
+from fuser import CDDFuseFuser
 from losses import *
 from utils import *
 
 EPSILON = 1e-3
-
-# Create output dir
 args = parser.parse_args()
 current_time = time.strftime("%Y%m%d_%H%M%S")
 args.output_dir = join_path(args.output_dir, current_time)
-create_dirs(args.output_dir)
-
-# Init Tensorboard dir
-writer = SummaryWriter(join_path(args.output_dir, "summary"))
-
-# Set logging
-logging.basicConfig(
-    format="%(asctime)s - %(funcName)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler(join_path(args.output_dir, current_time + ".log")),
-        logging.StreamHandler(),
-    ],
-)
-
-# Set device
 device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
 
-def test(encoder, decoder, fuser, test_set: FingerPrint, epoch, write_result=False):
+def test(encoder, decoder, fuser, dataset: FingerPrint, epoch, write_result=False):
     logging.info("start testing...")
     encoder.eval()
     decoder.eval()
     fuser.eval()
     test_loss = 0.0
 
-    testloader = DataLoader(test_set, batch_size=1, shuffle=False)
+    testloader = DataLoader(dataset, batch_size=1, shuffle=False)
     with torch.no_grad():
         for i, data in enumerate(testloader):
             assert len(data) == 4
@@ -57,9 +39,9 @@ def test(encoder, decoder, fuser, test_set: FingerPrint, epoch, write_result=Fal
             img_oct = data[1].to(device)
 
             # run the model on the test set to predict
-            f_tir_base, f_tir_detail = encoder(img_tir, with_score=False)
-            f_oct_base, f_oct_detail = encoder(img_oct, with_score=False)
-            f_fuse_base, f_fuse_detail = fuser(f_tir_base + f_oct_base, f_tir_detail + f_oct_detail)
+            f_tir_base, f_tir_detail = encoder(img_tir, with_quality=False)
+            f_oct_base, f_oct_detail = encoder(img_oct, with_quality=False)
+            f_fuse_base, f_fuse_detail = fuser(f_tir_base, f_tir_detail, f_oct_base, f_oct_detail)
             img_fused = decoder(f_fuse_base, f_fuse_detail)
 
             # save testset results
@@ -74,18 +56,32 @@ def test(encoder, decoder, fuser, test_set: FingerPrint, epoch, write_result=Fal
 
 
 def train(train_set: FingerPrint, test_set: FingerPrint):
+    # Create output dir
+    create_dirs(args.output_dir)
+
+    # Init Tensorboard dir
+    writer = SummaryWriter(join_path(args.output_dir, "summary_cddfuse"))
+
+    # Set logging
+    logging.basicConfig(
+        format="%(asctime)s - %(funcName)s - %(levelname)s - %(message)s",
+        level=logging.INFO,
+        handlers=[
+            logging.FileHandler(join_path(args.output_dir, current_time + ".log")),
+            logging.StreamHandler(),
+        ],
+    )
+
     # init models
-    args.network_type = "CDDFuse"
     encoder = CDDFuseEncoder()
     decoder = CDDFuseDecoder()
     fuser = CDDFuseFuser()
-    load_model(args.pretrain_weight + "_enc.pth", encoder)
-    load_model(args.pretrain_weight + "_dec.pth", decoder)
-    load_model(args.pretrain_weight + "_fuse.pth", fuser)
-
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
-    fuser = fuser.to(device)
+    load_model(args.pretrain_weight, encoder, "encoder")
+    load_model(args.pretrain_weight, decoder, "decoder")
+    load_model(args.pretrain_weight, fuser, "fuser")
+    encoder.to(device)
+    decoder.to(device)
+    fuser.to(device)
 
     loss_minimum = 10000.0
 
@@ -112,8 +108,8 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
 
             if epoch < 40:
                 # forward
-                f_tir_base, f_tir_detail = encoder(img_tir, with_score=False)
-                f_oct_base, f_oct_detail = encoder(img_oct, with_score=False)
+                f_tir_base, f_tir_detail = encoder(img_tir, with_quality=False)
+                f_oct_base, f_oct_detail = encoder(img_oct, with_quality=False)
                 tir_rec = decoder(f_tir_base, f_tir_detail)
                 oct_rec = decoder(f_oct_base, f_oct_detail)
 
@@ -132,9 +128,9 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
                 optimizer.step()
             else:
                 # forward
-                f_tir_base, f_tir_detail = encoder(img_tir, with_score=False)
-                f_oct_base, f_oct_detail = encoder(img_oct, with_score=False)
-                f_fuse_base, f_fuse_detail = fuser(f_tir_base + f_oct_base, f_tir_detail + f_oct_detail)
+                f_tir_base, f_tir_detail = encoder(img_tir, with_quality=False)
+                f_oct_base, f_oct_detail = encoder(img_oct, with_quality=False)
+                f_fuse_base, f_fuse_detail = fuser(f_tir_base, f_tir_detail, f_oct_base, f_oct_detail)
                 img_fused = decoder(f_fuse_base, f_fuse_detail)
 
                 # backward
@@ -186,15 +182,19 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
         if (epoch > 10) & (epoch % args.save_interval == 0):
             models_dir = join_path(args.output_dir, "models")
             create_dirs(models_dir)
-            save_model(join_path(models_dir, f"epoch{epoch}_enc.pth"), encoder)
-            save_model(join_path(models_dir, f"epoch{epoch}_dec.pth"), decoder)
+            models_state = {
+                "encoder": encoder.state_dict(),
+                "decoder": decoder.state_dict(),
+                "fuser": fuser.state_dict(),
+            }
+            save_models(join_path(models_dir, f"epoch{epoch}.pth"), models_state)
 
         logging.info("========================================")
 
     return encoder, decoder, fuser
 
 
-def eval_fuse(encoder, decoder, fuser, dir_tir, dir_oct, dir_output):
+def eval(encoder, decoder, fuser, dir_tir, dir_oct, dir_output):
     cost = 0.0
     count = 0
     with torch.no_grad():
@@ -211,9 +211,9 @@ def eval_fuse(encoder, decoder, fuser, dir_tir, dir_oct, dir_output):
             t_oct = torch.unsqueeze(torch.from_numpy(img_oct) / 255.0, dim=0).to(device)
 
             start = time.time()
-            f_tir_base, f_tir_detail = encoder(t_tir, with_score=False)
-            f_oct_base, f_oct_detail = encoder(t_oct, with_score=False)
-            f_fuse_base, f_fuse_detail = fuser(f_tir_base + f_oct_base, f_tir_detail + f_oct_detail)
+            f_tir_base, f_tir_detail = encoder(t_tir, with_quality=False)
+            f_oct_base, f_oct_detail = encoder(t_oct, with_quality=False)
+            f_fuse_base, f_fuse_detail = fuser(f_tir_base, f_tir_detail, f_oct_base, f_oct_detail)
             img_fused = decoder(f_fuse_base, f_fuse_detail)
             cost += time.time() - start
             count += 1
@@ -224,50 +224,52 @@ def eval_fuse(encoder, decoder, fuser, dir_tir, dir_oct, dir_output):
 
 
 if __name__ == "__main__":
+    args.network_type = "CDDFuse"
     # Train
+    logging.info(args)
+    tir_data_path = join_path(args.data_dir, "tir")
+    oct_data_path = join_path(args.data_dir, "oct")
 
-    # logging.info(args)
-    # tir_data_path = join_path(args.data_dir, "tir")
-    # oct_data_path = join_path(args.data_dir, "oct")
+    img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
+    logging.info(f"Dataset size: {len(img_paths_tir)}")
+    random.shuffle(img_paths_tir)
+    test_paths = img_paths_tir[: args.test_num]
+    train_paths = img_paths_tir[args.test_num :]
+    train_set = FingerPrint(train_paths, tir_data_path, oct_data_path, image_size=args.image_size, is_train=True, with_score=True)
+    test_set = FingerPrint(test_paths, tir_data_path, oct_data_path, image_size=args.image_size, is_train=False, with_score=True)
+    logging.info(f"Train set size: {len(train_set)}, Test set size: {len(test_set)}")
 
-    # img_paths_tir = glob(join_path(tir_data_path, "*.bmp"))
-    # logging.info(f"Dataset size: {len(img_paths_tir)}")
-    # random.shuffle(img_paths_tir)
-    # test_paths = img_paths_tir[: args.test_num]
-    # train_paths = img_paths_tir[args.test_num :]
-    # train_set = FingerPrint(train_paths, tir_data_path, oct_data_path, image_size=args.image_size, is_train=True, with_score=True)
-    # test_set = FingerPrint(test_paths, tir_data_path, oct_data_path, image_size=args.image_size, is_train=False, with_score=True)
-    # logging.info(f"Train set size: {len(train_set)}, Test set size: {len(test_set)}")
-
-    # encoder, decoder, fuser = train(train_set, test_set)
-    # models_dir = join_path(args.output_dir, "models")
-    # create_dirs(models_dir)
-    # save_model(join_path(models_dir, f"final_enc.pth"), encoder)
-    # save_model(join_path(models_dir, f"final_dec.pth"), decoder)
-    # save_model(join_path(models_dir, f"final_fuse.pth"), fuser)
+    encoder, decoder, fuser = train(train_set, test_set)
+    models_dir = join_path(args.output_dir, "models")
+    create_dirs(models_dir)
+    models_state = {
+        "encoder": encoder.state_dict(),
+        "decoder": decoder.state_dict(),
+        "fuser": fuser.state_dict(),
+    }
+    save_models(join_path(models_dir, f"final.pth"), models_state)
 
     # Eval
-    model_base = "output/20240918_055413/models/final"
+    model_path = "output/20240918_055413/models/final.pth"
+    if not os.path.exists(model_path):
+        print(f"model path:{model_path} is not exists")
+        exit()
     data_dir = "experiment/raw_data/1208"
     dir_output = "experiment/results/1208_cddfuse_raw"
     create_dirs(dir_output)
 
     encoder = CDDFuseEncoder()
-    load_model(model_base + "_enc.pth", encoder)
-    encoder.to(device)
-    encoder.eval()
-
     decoder = CDDFuseDecoder()
-    load_model(model_base + "_dec.pth", decoder)
-    decoder.to(device)
-    decoder.eval()
-
     fuser = CDDFuseFuser()
-    load_model(model_base + "_fuse.pth", fuser)
-    fuser.to(device)
-    fuser.eval()
+
+    load_model(model_path, encoder, "encoder")
+    load_model(model_path, decoder, "decoder")
+    load_model(model_path, fuser, "fuser")
+    encoder.to(device).eval()
+    decoder.to(device).eval()
+    fuser.to(device).eval()
 
     dir_tir = data_dir + "/tir"
     dir_oct = data_dir + "/oct"
-    cost = eval_fuse(encoder, decoder, fuser, dir_tir, dir_oct, dir_output)
+    cost = eval(encoder, decoder, fuser, dir_tir, dir_oct, dir_output)
     print(f"Average time: {cost}s")

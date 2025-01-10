@@ -14,19 +14,19 @@ parser.add_argument(
     "--with_quality",
     default=True,
     type=bool,
-    help="train with quality",
+    help="Train with quality",
 )
 parser.add_argument(
-    "--with_better",
+    "--with_revaluate",
     default=True,
     type=bool,
-    help="train with better quality",
+    help="Train with revaluate quality of fused image",
 )
 parser.add_argument(
     "--fuse_type",
     default="pow",
     type=str,
-    choices=["pow", "exp"],
+    choices=["add", "pow", "exp"],
     help="Choose the fuse type",
 )
 
@@ -39,7 +39,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--pretrain_weight",
-    default="output/xxx/models/final",
+    default="output/xxx/models/final.pth",
     type=str,
     help="pretrain weight",
 )

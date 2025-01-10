@@ -5,7 +5,7 @@ import torch
 
 from decoder import CDDFuseDecoder, DenseFuseDecoder
 from encoder import CDDFuseEncoder, DenseFuseEncoder
-from fusion import weight_fusion
+from fuser import WeightFuser
 from utils import *
 
 device = torch.device("cuda:0")
@@ -80,7 +80,8 @@ def eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type: str):
             if fuse_type == "conv":
                 t_fused = decoder(f_tir, f_oct)
             else:
-                f_fused = weight_fusion(f_tir, f_oct, q_probs_tir, q_probs_oct, strategy_type=fuse_type)
+                weight_fuse = WeightFuser(strategy=fuse_type)
+                f_fused = weight_fuse(f_tir, f_oct, q_probs_tir, q_probs_oct, strategy_type=fuse_type)
                 t_fused = decoder(f_fused)
             cost += time.time() - start
             count += 1

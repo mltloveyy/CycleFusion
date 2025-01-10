@@ -12,25 +12,32 @@ from cnn_modules import DenseBlock
 
 # from densefuse
 class DenseFuseEncoder(nn.Module):
-    def __init__(self, repeat=3):
+    def __init__(
+        self,
+        in_channels=1,
+        out_channels=1,
+        dim=64,
+        repeat=3,
+    ):
         super(DenseFuseEncoder, self).__init__()
         denseblock = DenseBlock
-        nb_filter = [1, 16]
-        kernel_size = 3
-        stride = 1
+        first_dim = dim // (2 ** (repeat - 1))
 
-        self.conv = nn.Conv2d(nb_filter[0], nb_filter[1], kernel_size, stride, padding=kernel_size // 2)  # [n,1,h,w] -> [n,16,h,w]
-        self.DB = denseblock(nb_filter[1], kernel_size, stride, repeat)  # [n,16,h,w] -> [n,64,h,w]
+        self.conv = nn.Conv2d(in_channels=in_channels, out_channels=first_dim, kernel_size=3, stride=1, padding=1)  # [n,1,h,w] -> [n,16,h,w]
+        self.DB = denseblock(in_channels=first_dim, kernel_size=3, stride=1, repeat=repeat)  # [n,16,h,w] -> [n,64,h,w]
         self.score_conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=7, stride=1, padding=3, bias=False)
         self.act = nn.Sigmoid()
 
-    def forward(self, input):
+    def forward(self, input, with_quality=True):
         f = self.conv(input)
         f = self.DB(f)
-        score = torch.cat([torch.mean(f, 1, keepdim=True), torch.max(f, 1, keepdim=True)[0]], 1)
-        score = self.score_conv(score)
-        score = self.act(score)
-        return f, score
+        if with_quality:
+            score = torch.cat([torch.mean(f, 1, keepdim=True), torch.max(f, 1, keepdim=True)[0]], 1)
+            score = self.score_conv(score)
+            score = self.act(score)
+            return f, score
+        else:
+            return f
 
 
 # from cddfuse
@@ -45,42 +52,44 @@ class CDDFuseEncoder(nn.Module):
         ffn_expansion_factor=2,
         bias=False,
         LayerNorm_type="WithBias",
+        with_quality=False,
     ):
 
         super(CDDFuseEncoder, self).__init__()
 
         self.patch_embed = OverlapPatchEmbed(in_channels, dim)
 
-        self.encoder_level1 = nn.Sequential(
-            *[
-                TransformerBlock(
-                    dim=dim,
-                    num_heads=heads[0],
-                    ffn_expansion_factor=ffn_expansion_factor,
-                    bias=bias,
-                    LayerNorm_type=LayerNorm_type,
-                )
-                for i in range(num_blocks[0])
-            ]
-        )
+        layers = [
+            TransformerBlock(
+                dim=dim,
+                num_heads=heads[0],
+                ffn_expansion_factor=ffn_expansion_factor,
+                bias=bias,
+                LayerNorm_type=LayerNorm_type,
+            )
+            for i in range(num_blocks[0])
+        ]
+        self.encoder_level1 = nn.Sequential(*layers)
+
         self.baseFeature = BaseFeatureExtraction(dim=dim, num_heads=heads[2])
         self.detailFeature = DetailFeatureExtraction()
-        self.score_head = nn.Sequential(
-            # nn.Conv2d(dim * 2, dim, kernel_size=3, stride=1, padding=1, bias=bias),
-            # nn.LeakyReLU(),
-            nn.Conv2d(dim * 2, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
-            nn.Sigmoid(),
-        )
+        self.with_quality = with_quality
+        if self.with_quality:
+            self.score_head = nn.Sequential(
+                nn.Conv2d(dim * 2, dim, kernel_size=3, stride=1, padding=1, bias=bias),
+                nn.LeakyReLU(),
+                nn.Conv2d(dim, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
+                nn.Sigmoid(),
+            )
 
-    def forward(self, in_img, with_score=True):
-        in_enc_level1 = self.patch_embed(in_img)  # b*64*h*w
+    def forward(self, input):
+        in_enc_level1 = self.patch_embed(input)  # b*64*h*w
         out_enc_level1 = self.encoder_level1(in_enc_level1)  # b*64*h*w
         base_feature = self.baseFeature(out_enc_level1)  # b*64*h*w
         detail_feature = self.detailFeature(out_enc_level1)  # b*64*h*w
-        if with_score:
-            # ours
+        if self.with_quality:
             features = torch.cat((base_feature, detail_feature), dim=1)  # b*128*h*w
             score = self.score_head(features)
-            return features, score
+            return base_feature, detail_feature, score
         else:
-            return base_feature, detail_feature  # CDDFuse
+            return base_feature, detail_feature
