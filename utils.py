@@ -14,16 +14,18 @@ def join_path(path: str, subpath: str) -> str:
     return os.path.join(path, subpath)
 
 
-def read_image(path: str, boost: bool = False) -> np.array:
+def read_image(path: str, boost: bool = False) -> np.ndarray:
     image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if boost:
         image = cv2.convertScaleAbs(image, alpha=1.08, beta=0)
     if len(image.shape) == 2:
-        image = image[..., np.newaxis]
+        image = image[:, :, np.newaxis]
+    if image.shape[-1] == 4:
+        image = image[:, :, :3]
     return image
 
 
-def color_invert(image: np.array):
+def color_invert(image: np.ndarray):
     return 255 - image
 
 

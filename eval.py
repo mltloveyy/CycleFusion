@@ -3,15 +3,13 @@ import time
 
 import torch
 
-from decoder import CDDFuseDecoder, DenseFuseDecoder
-from encoder import CDDFuseEncoder, DenseFuseEncoder
-from fuser import WeightFuser
+from networks import QualityFuser
 from utils import *
 
 device = torch.device("cuda:0")
 
 
-def eval_quality(encoder, dir_input, dir_output):
+def eval_quality(model: QualityFuser, dir_input, dir_output):
     cost = 0.0
     count = 0
     with torch.no_grad():
@@ -20,21 +18,21 @@ def eval_quality(encoder, dir_input, dir_output):
                 continue
 
             path_input = join_path(dir_input, img_name)
-            path_output = join_path(dir_output, img_name)
 
             img = read_image(path_input).transpose(2, 0, 1)
-            input = torch.unsqueeze(torch.from_numpy(img) / 255.0, dim=0).to(device)
+            input = torch.from_numpy(img / 255.0).unsqueeze(0).to(device)
 
             start = time.time()
-            _, q_probs = encoder(input)
+            q_probs = model.encoder(input)[-1]
             cost += time.time() - start
             count += 1
 
+            path_output = join_path(dir_output, img_name)
             save_tensor(q_probs.cpu().detach(), path_output)
     return cost / count
 
 
-def eval_restore(encoder, decoder, dir_input, dir_output):
+def eval_restore(model: QualityFuser, dir_input, dir_output):
     cost = 0.0
     count = 0
     with torch.no_grad():
@@ -43,22 +41,26 @@ def eval_restore(encoder, decoder, dir_input, dir_output):
                 continue
 
             path_input = join_path(dir_input, img_name)
-            path_output = join_path(dir_output, img_name)
 
             img = read_image(path_input).transpose(2, 0, 1)
-            input = torch.unsqueeze(torch.from_numpy(img) / 255.0, dim=0).to(device)
+            input = torch.from_numpy(img / 255.0).unsqueeze(0).to(device)
 
             start = time.time()
-            f, _ = encoder(input)
-            output = decoder(f)
+            if model.use_hybrid:
+                f_base, f_detail, _ = model.encoder(input)
+                output = model.decoder(f_base, f_detail)
+            else:
+                f, _ = model.encoder(input)
+                output = model.decoder(f)
             cost += time.time() - start
             count += 1
 
+            path_output = join_path(dir_output, img_name)
             save_tensor(output.cpu().detach(), path_output)
     return cost / count
 
 
-def eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type: str):
+def eval_fuse(model: QualityFuser, dir_tir, dir_oct, dir_output):
     cost = 0.0
     count = 0
     with torch.no_grad():
@@ -71,58 +73,46 @@ def eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type: str):
 
             img_tir = read_image(path_tir).transpose(2, 0, 1)
             img_oct = read_image(path_oct).transpose(2, 0, 1)
-            t_tir = torch.unsqueeze(torch.from_numpy(img_tir) / 255.0, dim=0).to(device)
-            t_oct = torch.unsqueeze(torch.from_numpy(img_oct) / 255.0, dim=0).to(device)
+            t_tir = torch.from_numpy(img_tir / 255.0).unsqueeze(0).to(device)
+            t_oct = torch.from_numpy(img_oct / 255.0).unsqueeze(0).to(device)
 
             start = time.time()
-            f_tir, q_probs_tir = encoder(t_tir)
-            f_oct, q_probs_oct = encoder(t_oct)
-            if fuse_type == "conv":
-                t_fused = decoder(f_tir, f_oct)
-            else:
-                weight_fuse = WeightFuser(strategy=fuse_type)
-                f_fused = weight_fuse(f_tir, f_oct, q_probs_tir, q_probs_oct, strategy_type=fuse_type)
-                t_fused = decoder(f_fused)
+            model.encode(t_tir, t_oct)
+            img_fused, _ = model.fuse()
             cost += time.time() - start
             count += 1
-            # only fused image
+
             path_output = join_path(dir_output, img_name)
-            save_tensor(t_fused.cpu().detach(), path_output)
-            # all outputs
-            # _, q_probs_fused = encoder(t_fused)
-            # img_outputs = torch.cat((t_tir, t_oct, t_fused), dim=-1)
-            # score_outputs = torch.cat((q_probs_tir, q_probs_oct, q_probs_fused), dim=-1)
-            # outputs = torch.cat((img_outputs, score_outputs), dim=-2).cpu()
-            # path_output = join_path(dir_output, img_name)
-            # save_tensor(outputs.detach(), path_output)
+            save_tensor(img_fused.cpu().detach(), path_output)
     return cost / count
 
 
 if __name__ == "__main__":
-    model_base = "output/20240814_024325/models/epoch40"
-    data_dir = "experiment/raw_data/738"
+    path_model = "output/20240814_024325/models/epoch40"
+    if not os.path.exists(path_model):
+        print(f"model path:{path_model} is not exists")
+        exit()
+    dir_data = "experiment/raw_data/738"
     dir_output = "experiment/results/738_cdd_add_new2"
     create_dirs(dir_output)
 
-    encoder = CDDFuseEncoder()
-    load_model(model_base + "_enc.pth", encoder)
-    encoder.to(device)
-    encoder.eval()
+    model = QualityFuser(
+        network_type="cddfuse",
+        fuse_type="feature",
+        with_quality=True,
+        with_reval=False,
+    )
+    model.load(path_model)
+    model.to("eval", device)
 
-    decoder = CDDFuseDecoder()
-    load_model(model_base + "_dec.pth", decoder)
-    decoder.to(device)
-    decoder.eval()
-
-    dir_tir = data_dir + "/tir"
-    dir_oct = data_dir + "/oct"
+    dir_tir = dir_data + "/tir"
+    dir_oct = dir_data + "/oct"
 
     # fuse
-    fuse_type = "add"  # add, pow, exp, conv
-    cost = eval_fuse(encoder, decoder, dir_tir, dir_oct, dir_output, fuse_type)
+    cost = eval_fuse(model, dir_tir, dir_oct, dir_output)
 
     # restore
-    # cost = eval_restore(encoder, decoder, dir_tir, dir_output)
+    # cost = eval_restore(model, dir_tir, dir_output)
 
     # quality
     # cost = eval_quality(encoder, dir_tir, dir_output)

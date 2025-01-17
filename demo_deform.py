@@ -12,39 +12,52 @@ from torch.utils.tensorboard import SummaryWriter
 from args import parser
 from data_process import FingerPrint
 from losses import *
-from networks import QualityFuser, cddfuse_offical
+from networks import DeformedFuser
+from quality import calc_quality_torch
 from utils import *
 
 EPSILON = 1e-3
 args = parser.parse_args()
 current_time = time.strftime("%Y%m%d_%H%M%S")
-args.output_dir = join_path(args.output_dir, "cddfuse_" + current_time)
+args.output_dir = join_path(args.output_dir, "deform_" + current_time)
 device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
 
-def test(model: QualityFuser, dataset: FingerPrint, epoch, write_result=False):
+def test(model: DeformedFuser, test_set: FingerPrint, epoch, write_result=False):
     logging.info("start testing...")
     model.to("eval")
     test_loss = 0.0
 
-    testloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    testloader = DataLoader(test_set, batch_size=1, shuffle=False)
     with torch.no_grad():
         for i, data in enumerate(testloader):
             assert len(data) == 4
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
 
+            restore_loss_value, ncc_loss_value, flow_loss_value = 0, 0, 0
+
             # run the model on the test set to predict
             model.encode(img_tir, img_oct)
-            tir_rec, oct_rec = model.decode()
-            img_fused, _ = model.fuse()
+            rec_tir, rec_oct = model.decode()
+            reg_oct, trans_oct, flow = model.deform(img_oct)
+
+            restore_loss_value = args.restore_weight * (restore_loss(rec_tir, img_tir) + restore_loss(rec_oct, img_oct)).item()
+            ncc_loss_value = ncc_loss(reg_oct, img_tir).item() + ncc_loss(trans_oct, img_tir).item()
+            flow_loss_value = grad_loss(flow).item()
+
+            total_loss_value = restore_loss_value + ncc_loss_value + flow_loss_value
+            test_loss += total_loss_value
+            logging.debug(f"[Test loss] restore: {restore_loss_value:.5f} ncc: {ncc_loss_value:.5f} flow: {flow_loss_value:.5f}")
 
             # save testset results
             if write_result & (epoch % args.save_interval == 0):
                 logging.debug(f"save results at epoch={epoch}")
                 save_dir = join_path(args.output_dir, "validations")
                 create_dirs(save_dir)
-                output = torch.cat((img_tir, tir_rec, img_oct, oct_rec, img_fused), dim=-1).cpu()
+                rec_cmp = torch.cat((img_tir, rec_tir, img_oct, rec_oct), dim=-1).cpu()
+                deform_cmp = torch.cat((img_tir, img_oct, trans_oct, reg_oct), dim=-1).cpu()
+                output = torch.cat((rec_cmp, deform_cmp), dim=-2).cpu()
                 save_tensor(output, join_path(save_dir, f"epoch_{epoch}_{test_set.filenames[i]}.jpg"))
 
     return test_loss / len(testloader)
@@ -55,7 +68,7 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
     create_dirs(args.output_dir)
 
     # Init Tensorboard dir
-    writer = SummaryWriter(join_path(args.output_dir, "summary_cddfuse"))
+    writer = SummaryWriter(join_path(args.output_dir, "summary_deform"))
 
     # Set logging
     logging.basicConfig(
@@ -68,8 +81,13 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
     )
 
     # init models
-    model = cddfuse_offical
-    model.load(args.pretrain_weight)
+    model = DeformedFuser(
+        network_type=args.network_type,
+        fuse_type=None,
+        path=args.pretrain_weight,
+        pred_affine_mat=False,
+        img_size=(args.image_size, args.image_size),
+    )
     model.to("train", device)
 
     loss_minimum = 10000.0
@@ -78,10 +96,10 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
     for epoch in range(args.epochs):
         logging.info(f"start training No.{epoch} epoch...")
 
-        Loss = []
+        Loss_restore, Loss_ncc, Loss_flow = [], [], []
 
-        optimizer = Adam([{"params": model.encoder.parameters()}, {"params": model.decoder.parameters()}], lr=args.lr)
-        optimizer_fuse = Adam(model.fuser.parameters(), lr=args.lr)
+        optimizer1 = Adam([{"params": model.encoder.parameters()}, {"params": model.decoder.parameters()}], lr=args.lr)
+        optimizer2 = Adam(model.deformer.parameters(), lr=args.lr)
 
         start_epoch = time.time()
 
@@ -91,58 +109,65 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
             img_tir = data[0].to(device)
             img_oct = data[1].to(device)
 
-            # zero the parameter gradients
-            optimizer.zero_grad()
-            optimizer_fuse.zero_grad()
+            # zero the restorer parameter gradients
+            optimizer1.zero_grad()
 
-            if epoch < 40:
-                # forward
-                model.encode(img_tir, img_oct)
-                tir_rec, oct_rec = model.decode()
+            # restorer forward
+            model.encode(img_tir, img_oct)
+            rec_tir, rec_oct = model.decode()
 
-                # backward
-                loss_tir = 5 * ssim_loss(img_tir, tir_rec) + mse_loss(img_tir, tir_rec)
-                loss_oct = 5 * ssim_loss(img_oct, oct_rec) + mse_loss(img_oct, oct_rec)
+            # restorer backward
+            restore_loss_value = args.restore_weight * (restore_loss(rec_tir, img_tir) + restore_loss(rec_oct, img_oct))
+            loss1 = restore_loss_value
+            loss1.backward()
+            Loss_restore.append(restore_loss_value.item())
+            writer.add_scalar("train_loss/restore", restore_loss_value.item(), epoch * len(trainloader) + i)
 
-                cc_loss_base = cc(model.f1_base, model.f2_base)
-                cc_loss_detail = cc(model.f1_detail, model.f2_detail)
-                loss_decomp = (cc_loss_detail) ** 2 / (1.01 + cc_loss_base)
+            # optimize restorer
+            optimizer1.step()
 
-                loss = loss_tir + loss_oct + 2 * loss_decomp
-                loss.backward()
+            if i % args.critic == 0:
+                # froze restorer
+                for param in model.encoder.parameters():
+                    param.requires_grad = False
+                for param in model.decoder.parameters():
+                    param.requires_grad = False
 
-                # optimize
-                optimizer.step()
-            else:
-                # forward
-                model.encode(img_tir, img_oct)
-                img_fused, _ = model.fuse()
+                # zero the deformer parameter gradients
+                optimizer2.zero_grad()
 
-                # backward
-                cc_loss_base = cc(model.f1_base, model.f2_base)
-                cc_loss_detail = cc(model.f1_detail, model.f2_detail)
-                loss_decomp = (cc_loss_detail) ** 2 / (1.01 + cc_loss_base)
+                # deformer forward
+                reg_oct, trans_oct, flow = model.deform(img_oct)
 
-                fusion_loss, _, _ = cddfuse_loss(img_tir, img_oct, img_fused)
+                # deformer backward
+                ncc_loss_value = ncc_loss(reg_oct, img_tir) + ncc_loss(trans_oct, img_tir)
+                flow_loss_value = grad_loss(flow)
+                loss2 = ncc_loss_value + flow_loss_value
+                loss2.backward()
+                Loss_ncc.append(ncc_loss_value.item())
+                Loss_flow.append(flow_loss_value.item())
+                writer.add_scalar("train_loss/ncc", ncc_loss_value.item(), epoch * len(trainloader) + i)
+                writer.add_scalar("train_loss/flow", flow_loss_value.item(), epoch * len(trainloader) + i)
+                logging.info(f"[Iter{i}] restore: {restore_loss_value.item():.5f} ncc: {ncc_loss_value.item():.5f} flow: {flow_loss_value.item():.5f}")
 
-                loss = fusion_loss + 2 * loss_decomp
-                loss.backward()
+                # optimize deformer
+                optimizer2.step()
 
-                # optimize
-                optimizer.step()
-                optimizer_fuse.step()
-
-            Loss.append(loss.item())
-            writer.add_scalar("train_loss/loss", loss.item(), epoch * len(trainloader) + i)
-            logging.info(f"[Iter{i}] loss: {loss.item():.5f}")
+                # unfroze restorer
+                for param in model.encoder.parameters():
+                    param.requires_grad = True
+                for param in model.decoder.parameters():
+                    param.requires_grad = True
 
         end_epoch = time.time()
 
         # logging.info cost
         logging.info(f"epoch: {epoch} time_taken: {end_epoch - start_epoch:.3f}")
-        loss_mean = np.mean(np.array(Loss))
-        logging.info(f"[Train loss] loss: {loss_mean:.5f}")
-        train_loss = loss_mean
+        restore_mean = np.mean(np.array(Loss_restore))
+        ncc_mean = np.mean(np.array(Loss_ncc))
+        flow_mean = np.mean(np.array(Loss_flow))
+        logging.info(f"[Train loss] restore: {restore_mean:.5f} ncc: {ncc_mean:.5f} flow: {flow_mean:.5f}")
+        train_loss = restore_mean + ncc_mean + flow_mean
         writer.add_scalar("train_loss", train_loss, epoch)
         logging.info(f"[Train loss] {train_loss :.5f} minimum: {loss_minimum :.5f}")
         if train_loss < loss_minimum:
@@ -175,10 +200,6 @@ def train(train_set: FingerPrint, test_set: FingerPrint):
 
 
 if __name__ == "__main__":
-    args.network_type = "cddfuse"
-    args.fuse_type = "cddfuse"
-    args.with_quality = False
-    args.with_revaluate = False
     # Train
     logging.info(args)
     tir_data_path = join_path(args.data_dir, "tir")

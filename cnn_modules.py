@@ -2,30 +2,6 @@ import torch
 import torch.nn as nn
 
 
-# Conv+Act+Norm
-class ConvActNorm(nn.Sequential):
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        kernel_size=3,
-        stride=1,
-        padding=None,
-        use_relu=True,
-        use_bn=True,
-    ):
-        conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=kernel_size // 2, bias=False)
-        if use_relu:
-            act = nn.ReLU(inplace=True)
-        else:
-            act = nn.LeakyReLU(inplace=True)
-        if use_bn:
-            norm = nn.BatchNorm2d(out_channels)
-        else:
-            norm = nn.InstanceNorm2d(out_channels)
-        super(ConvActNorm, self).__init__(conv, act, norm)
-
-
 # Channel-attention Module
 class ChannelAttention(nn.Module):
     def __init__(self, in_planes, ratio=16):
@@ -80,7 +56,7 @@ class CBAM(nn.Module):
 
 
 # Dense Convolution Module
-class DenseConv2d(torch.nn.Module):
+class DenseConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
         super(DenseConv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=kernel_size // 2)
@@ -94,13 +70,10 @@ class DenseConv2d(torch.nn.Module):
 
 
 # Dense Block Module
-class DenseBlock(torch.nn.Module):
+class DenseBlock(nn.Module):
     def __init__(self, in_channels, kernel_size, stride, repeat):
         super(DenseBlock, self).__init__()
-        denseblock = []
-        for i in range(repeat):
-            denseblock.append(DenseConv2d(in_channels * (i + 1), in_channels, kernel_size, stride))
-        self.denseblock = nn.Sequential(*denseblock)
+        self.denseblock = nn.Sequential(*[DenseConv2d(in_channels * (i + 1), in_channels, kernel_size, stride) for i in range(repeat)])
 
     def forward(self, x):
         x = self.denseblock(x)
@@ -111,14 +84,22 @@ class DenseBlock(torch.nn.Module):
 class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels, skip_channels=0):
         super().__init__()
-        self.conv1 = ConvActNorm(in_channels + skip_channels, out_channels, 3, 1)
-        self.conv2 = ConvActNorm(out_channels, out_channels, 3, 1)
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.conv_skip = nn.Sequential(
+            nn.Conv2d(in_channels + skip_channels, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.conv = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(out_channels),
+        )
 
     def forward(self, x, skip=None):
         x = self.up(x)
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
-            x = self.conv1(x)
-        x = self.conv2(x)
+            x = self.conv_skip(x)
+        x = self.conv(x)
         return x
